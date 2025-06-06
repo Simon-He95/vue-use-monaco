@@ -5,7 +5,7 @@ import * as monaco from 'monaco-editor'
 // @ts-expect-error bundle import for shiki
 import { createHighlighter } from 'shiki/bundle/full'
 import { computed, onUnmounted } from 'vue'
-import { processedLanguage } from './code.detect'
+import { detectLanguage, processedLanguage } from './code.detect'
 import { isDark } from './isDark'
 
 export type MonacoEditorInstance = monaco.editor.IStandaloneCodeEditor
@@ -275,6 +275,10 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       return editorView
     },
   }
+}
+
+export {
+  detectLanguage,
 }
 
 // import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
