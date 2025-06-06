@@ -9,6 +9,9 @@ import { detectLanguage, processedLanguage } from './code.detect'
 import { isDark } from './isDark'
 
 export type MonacoEditorInstance = monaco.editor.IStandaloneCodeEditor
+export type {
+  ThemeInput,
+}
 
 let themesRegistered = false
 let languagesRegistered = false
