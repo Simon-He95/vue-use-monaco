@@ -2,7 +2,7 @@
   "name": "vue-use-monaco",
   "type": "module",
   "version": "0.0.1",
-  "description": "",
+  "description": "A Vue library for integrating Monaco Editor with Shiki syntax highlighting, supporting real-time updates.",
   "author": "Simon He",
   "license": "MIT",
   "funding": "https://github.com/sponsors/Simon-He95",
@@ -12,7 +12,15 @@
     "url": "git+https://github.com/Simon-He95/vue-use-monaco.git"
   },
   "bugs": "https://github.com/Simon-He95/vue-use-monaco/issues",
-  "keywords": [],
+  "keywords": [
+    "vue",
+    "monaco-editor",
+    "shiki",
+    "syntax-highlighting",
+    "real-time",
+    "code-editor",
+    "vue-library"
+  ],
   "sideEffects": false,
   "exports": {
     ".": {
