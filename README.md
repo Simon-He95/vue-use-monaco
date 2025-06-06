@@ -79,3 +79,10 @@ export default defineComponent({
     <img src="https://cdn.jsdelivr.net/gh/Simon-He95/sponsor/sponsors.png"/>
   </a>
 </p>
+
+## 致谢
+
+本项目感谢以下开源库的支持：
+
+- [Monaco Editor](https://microsoft.github.io/monaco-editor/) — 微软出品的强大代码编辑器内核。
+- [Shiki](https://shiki.matsu.io/) — 基于 TextMate 语法和 VS Code 主题的代码高亮库。
