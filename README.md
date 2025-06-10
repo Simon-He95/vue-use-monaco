@@ -60,6 +60,37 @@ export default defineComponent({
 
 通过 `useMonaco` 组合式函数，可以调用 `createEditor` 和 `updateCode` 方法来初始化编辑器和更新代码内容。
 
+## 配置说明
+
+在使用 Monaco 编辑器时，如果需要全局注入 worker，建议使用 [vite-plugin-monaco-editor-esm](https://www.npmjs.com/package/vite-plugin-monaco-editor-esm) 插件进行处理。特别是在 Windows 环境下打包时，可能会遇到问题，需要配置 `customDistPath` 来确保打包成功。
+
+以下是配置示例：
+
+```javascript
+// vite.config.js
+import monacoEditorPlugin from 'vite-plugin-monaco-editor-esm'
+import path from 'path'
+
+export default {
+  plugins: [
+    monacoEditorPlugin({
+      languageWorkers: [
+        'editorWorkerService',
+        'typescript',
+        'css',
+        'html',
+        'json',
+      ],
+      customDistPath(root, buildOutDir, base) {
+        return path.resolve(buildOutDir, 'monacoeditorwork')
+      },
+    }),
+  ],
+}
+```
+
+通过上述配置，可以解决 Monaco 编辑器在 Windows 环境下打包时的相关问题。
+
 ### 贡献
 
 欢迎提交 Issue 或 PR 来改进此项目！
