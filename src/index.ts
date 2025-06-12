@@ -211,6 +211,8 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     themeWatcher = watch(() => isDark.value, () => {
       initialTheme = currentTheme.value
       monaco.editor.setTheme(currentTheme.value)
+    }, {
+      flush: 'post',
     })
 
     return editorView
