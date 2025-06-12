@@ -1,10 +1,11 @@
 import type { SpecialTheme, ThemeInput } from 'shiki'
+import type { WatchStopHandle } from 'vue'
 import { shikiToMonaco } from '@shikijs/monaco'
-import * as monaco from 'monaco-editor'
 
+import * as monaco from 'monaco-editor'
 // @ts-expect-error bundle import for shiki
 import { createHighlighter } from 'shiki/bundle/full'
-import { computed, onUnmounted } from 'vue'
+import { computed, onUnmounted, watch } from 'vue'
 import { detectLanguage, processedLanguage } from './code.detect'
 import { isDark } from './isDark'
 
@@ -144,14 +145,23 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
   let lastContainer: HTMLElement | null = null
   let initialTheme = isDark.value ? typeof themes[0] === 'string' ? themes[0] : (themes[0] as any).name : typeof themes[1] === 'string' ? themes[1] : (themes[1] as any).name
   const currentTheme = computed<string>(() => isDark.value ? typeof themes[0] === 'string' ? themes[0] : (themes[0] as any).name : typeof themes[1] === 'string' ? themes[1] : (themes[1] as any).name)
+  let themeWatcher: WatchStopHandle | null = null
   async function createEditor(container: HTMLElement, code: string, language: string) {
     cleanupEditor()
     lastContainer = container
-    // 注册主题和语言
+
+    // Stop any previous watcher
+    if (themeWatcher) {
+      themeWatcher()
+      themeWatcher = null
+    }
+
+    // Register themes and languages
     if (!themeRegisterPromise) {
       themeRegisterPromise = registerMonacoThemes(themes, languages)
     }
     await themeRegisterPromise
+
     container.style.overflow = 'auto'
     container.style.maxHeight = `${MAX_HEIGHT}px`
     const defaultScrollbar = {
@@ -179,6 +189,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       },
       ...monacoOptions,
     })
+
     function updateHeight() {
       const lineCount = editorView!.getModel()?.getLineCount() ?? 1
       const lineHeight = editorView!.getOption(monaco.editor.EditorOption.lineHeight)
@@ -189,20 +200,25 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     updateHeight()
     editorView.onDidChangeModelContent(updateHeight)
 
-    // 新增：如果初始化时就有滚动条，滚动到底部
+    // Scroll to the bottom if initialized with a scrollbar
     const model = editorView.getModel()
     const lineCount = model?.getLineCount() ?? 1
-    if (
-      container.scrollHeight >= MAX_HEIGHT
-    ) {
+    if (container.scrollHeight >= MAX_HEIGHT) {
       editorView.revealLine(lineCount)
     }
+
+    // Watch for isDark changes and update the theme
+    themeWatcher = watch(() => isDark.value, () => {
+      initialTheme = currentTheme.value
+      monaco.editor.setTheme(currentTheme.value)
+    })
 
     return editorView
   }
 
   onUnmounted(cleanupEditor)
 
+  // Ensure cleanup stops the watcher
   function cleanupEditor() {
     if (editorView) {
       editorView.dispose()
@@ -211,6 +227,10 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     if (lastContainer) {
       lastContainer.innerHTML = ''
       lastContainer = null
+    }
+    if (themeWatcher) {
+      themeWatcher()
+      themeWatcher = null
     }
   }
 
@@ -268,13 +288,13 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
         console.warn(`Language "${language}" is not registered. Available languages: ${languages.join(', ')}`)
       }
     },
-    get currentTheme() {
+    getCurrentTheme() {
       return initialTheme
     },
-    get editor() {
+    getEditor() {
       return monaco.editor
     },
-    get editorView() {
+    getEditorView() {
       return editorView
     },
   }

@@ -12,6 +12,8 @@
 - 集成 Monaco 编辑器，提供强大的代码编辑功能。
 - 使用 Shiki 实现高效的语法高亮。
 - 支持流式输入更新，实时响应。
+- 自动监听 isDark 模式变化，自动切换主题。
+- 自动销毁编辑器实例，避免内存泄漏。
 
 ### 安装
 
@@ -27,34 +29,52 @@ pnpm add use-monaco
 
 ```vue
 <script>
-import { defineComponent, ref } from 'vue'
+import { defineComponent, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useMonaco } from 'vue-use-monaco'
 
 export default defineComponent({
-  setup() {
-    const code = ref('')
-    const editorOptions = {
-      language: 'javascript',
-      theme: 'vs-dark',
-    }
-
-    const { createEditor, updateCode } = useMonaco({
+  name: 'MonacoEditor',
+  props: {
+    code: {
+      type: String,
+      required: true,
+    },
+    language: {
+      type: String,
+      required: true,
+    },
+  },
+  setup(props) {
+    const codeEditor = ref<HTMLElement | null>(null)
+    const { createEditor, updateCode, cleanupEditor } = useMonaco({
       themes: ['vitesse-dark', 'vitesse-light'],
       languages: ['javascript', 'typescript', 'vue'],
     })
 
-    const editor = createEditor(document.getElementById('editor-container'), code.value, editorOptions.language)
+    // 创建编辑器实例
+    onMounted(async () => {
+      if (codeEditor.value) {
+        await createEditor(codeEditor.value, props.code, props.language)
+      }
+    })
 
-    // 更新代码内容
-    updateCode('新的代码内容', 'javascript')
+    // 监听代码和语言变化
+    watch(
+      () => [props.code, props.language],
+      ([newCode, newLanguage]) => {
+        updateCode(newCode, newLanguage)
+      }
+    )
 
-    return { code, editorOptions }
+    return {
+      codeEditor,
+    }
   },
 })
 </script>
 
 <template>
-  <MonacoEditor v-model="code" :options="editorOptions" />
+  <div ref="codeEditor" />
 </template>
 ```
 
@@ -67,9 +87,9 @@ export default defineComponent({
 以下是配置示例：
 
 ```javascript
+import path from 'node:path'
 // vite.config.js
 import monacoEditorPlugin from 'vite-plugin-monaco-editor-esm'
-import path from 'path'
 
 export default {
   plugins: [
