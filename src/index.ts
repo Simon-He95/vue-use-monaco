@@ -143,7 +143,6 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
   ]
   const MAX_HEIGHT = monacoOptions.MAX_HEIGHT ?? 500
   let lastContainer: HTMLElement | null = null
-  let initialTheme = isDark.value ? typeof themes[0] === 'string' ? themes[0] : (themes[0] as any).name : typeof themes[1] === 'string' ? themes[1] : (themes[1] as any).name
   const currentTheme = computed<string>(() => isDark.value ? typeof themes[0] === 'string' ? themes[0] : (themes[0] as any).name : typeof themes[1] === 'string' ? themes[1] : (themes[1] as any).name)
   let themeWatcher: WatchStopHandle | null = null
   async function createEditor(container: HTMLElement, code: string, language: string) {
@@ -177,7 +176,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     editorView = monaco.editor.create(container, {
       value: code,
       language,
-      theme: initialTheme,
+      theme: currentTheme.value,
       scrollBeyondLastLine: false,
       minimap: { enabled: false },
       automaticLayout: true,
@@ -209,7 +208,6 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
 
     // Watch for isDark changes and update the theme
     themeWatcher = watch(() => isDark.value, () => {
-      initialTheme = currentTheme.value
       monaco.editor.setTheme(currentTheme.value)
     }, {
       flush: 'post',
@@ -250,11 +248,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
         monaco.editor.setModelLanguage(model, processedCodeLanguage)
       }
       // 如果当前主题与 isDark 状态不一致，则切换主题
-      if (initialTheme !== currentTheme.value) {
-        // 切换主题
-        initialTheme = currentTheme.value
-        monaco.editor.setTheme(currentTheme.value)
-      }
+      monaco.editor.setTheme(currentTheme.value)
       const prevLineCount = model.getLineCount()
       model.setValue(newCode)
       const newLineCount = model.getLineCount()
@@ -270,7 +264,6 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     },
     setTheme(theme: MonacoTheme) {
       if (themes.includes(theme)) {
-        initialTheme = theme
         monaco.editor.setTheme(typeof theme === 'string' ? theme : (theme as any).name)
       }
       else {
@@ -291,7 +284,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       }
     },
     getCurrentTheme() {
-      return initialTheme
+      return currentTheme.value
     },
     getEditor() {
       return monaco.editor
