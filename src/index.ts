@@ -19,6 +19,7 @@ let languagesRegistered = false
 let themeRegisterPromise: Promise<void> | null = null
 let currentThemes: (ThemeInput | string | SpecialTheme)[] = []
 let currentLanguages: string[] = []
+const disposals: monaco.IDisposable[] = []
 
 async function registerMonacoThemes(themes: (ThemeInput | string | SpecialTheme)[], languages: string[]) {
   registerMonacoLanguages(languages)
@@ -57,41 +58,73 @@ export interface MonacoOptions extends monaco.editor.IStandaloneEditorConstructi
   readOnly?: boolean
   themes?: MonacoTheme[]
   languages?: MonacoLanguage[]
-  // 主题名称，默认为 ['vitesse-dark', 'vitesse-light']
-  // 如果需要使用自定义主题，可以传入一个字符串数组 并且 dark 要在前面
-  // 例如: ['my-dark-theme', 'my-light-theme']
-  // 如果不传入 themes 则使用默认主题 ['vitesse-dark', 'vitesse-light']
-  // 如果传入了 themes 则会覆盖默认主题
   theme?: string
+  isCleanOnBeforeCreate?: boolean
+  // 添加在编辑器创建之前的钩子
+  onBeforeCreate?: (monaco: typeof import('monaco-editor')) => monaco.IDisposable[]
 }
 
 /**
  * useMonaco 组合式函数
  *
  * 提供 Monaco 编辑器的创建、销毁、内容/主题/语言更新等能力。
+ * 支持主题自动切换、语言高亮、代码更新等功能。
  *
- * @param monacoOptions - 编辑器初始化配置，支持 Monaco 原生配置及扩展项
+ * @param {MonacoOptions} [monacoOptions] - 编辑器初始化配置，支持 Monaco 原生配置及扩展项
+ * @param {number} [monacoOptions.MAX_HEIGHT] - 编辑器最大高度（像素）
+ * @param {boolean} [monacoOptions.readOnly] - 是否为只读模式
+ * @param {MonacoTheme[]} [monacoOptions.themes] - 主题数组，至少包含两个主题：[暗色主题, 亮色主题]
+ * @param {MonacoLanguage[]} [monacoOptions.languages] - 支持的编程语言数组
+ * @param {string} [monacoOptions.theme] - 初始主题名称
+ * @param {boolean} [monacoOptions.isCleanOnBeforeCreate] - 是否在创建前清理之前注册的资源, 默认为 true
+ * @param {(monaco: typeof import('monaco-editor')) => monaco.IDisposable[]} [monacoOptions.onBeforeCreate] - 编辑器创建前的钩子函数
+ *
  * @returns {{
- *   createEditor: (container: HTMLElement, code: string, language: string) => Promise<monaco.editor.IStandaloneCodeEditor | null>,
+ *   createEditor: (container: HTMLElement, code: string, language: string) => Promise<monaco.editor.IStandaloneCodeEditor>,
  *   cleanupEditor: () => void,
  *   updateCode: (newCode: string, codeLanguage: string) => void,
  *   setTheme: (theme: MonacoTheme) => void,
  *   setLanguage: (language: MonacoLanguage) => void,
- *   currentTheme: MonacoTheme,
- *   editor: typeof monaco.editor,
- *   editorView: monaco.editor.IStandaloneCodeEditor | null,
- * }}
+ *   getCurrentTheme: () => string,
+ *   getEditor: () => typeof monaco.editor,
+ *   getEditorView: () => monaco.editor.IStandaloneCodeEditor | null
+ * }} 返回对象包含以下方法和属性：
  *
- * - createEditor(container, code, language): 创建并挂载 Monaco 编辑器
- * - cleanupEditor(): 销毁编辑器并清理容器
- * - updateCode(newCode, codeLanguage): 更新内容和语言，必要时滚动到底部
- * - setTheme(theme): 切换主题
- * - setLanguage(language): 切换语言
- * - currentTheme: 当前主题
- * - editor: Monaco 的静态 editor 对象（一般用于静态方法）
- * - editorView: 当前编辑器实例
+ * @property {Function} createEditor - 创建并挂载 Monaco 编辑器到指定容器
+ * @property {Function} cleanupEditor - 销毁编辑器并清理容器
+ * @property {Function} updateCode - 更新编辑器内容和语言，必要时滚动到底部
+ * @property {Function} setTheme - 切换编辑器主题
+ * @property {Function} setLanguage - 切换编辑器语言
+ * @property {Function} getCurrentTheme - 获取当前主题名称
+ * @property {Function} getEditor - 获取 Monaco 的静态 editor 对象（用于静态方法调用）
+ * @property {Function} getEditorView - 获取当前编辑器实例
+ *
+ * @throws {Error} 当主题数组不是数组或长度小于2时抛出错误
+ *
+ * @example
+ * ```typescript
+ * import { useMonaco } from 'vue-use-monaco'
+ *
+ * const { createEditor, updateCode, setTheme } = useMonaco({
+ *   themes: ['vitesse-dark', 'vitesse-light'],
+ *   languages: ['javascript', 'typescript'],
+ *   readOnly: false
+ * })
+ *
+ * // 创建编辑器
+ * const editor = await createEditor(containerRef.value, 'console.log("hello")', 'javascript')
+ *
+ * // 更新代码
+ * updateCode('console.log("world")', 'javascript')
+ *
+ * // 切换主题
+ * setTheme('vitesse-light')
+ * ```
  */
 export function useMonaco(monacoOptions: MonacoOptions = {}) {
+  // 清除之前在 onBeforeCreate 中注册的资源
+  if (monacoOptions.isCleanOnBeforeCreate ?? true)
+    disposals.forEach(d => d.dispose())
   let editorView: monaco.editor.IStandaloneCodeEditor | null = null
 
   const themes = monacoOptions.themes ?? ['vitesse-dark', 'vitesse-light']
@@ -145,6 +178,13 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
   let lastContainer: HTMLElement | null = null
   const currentTheme = computed<string>(() => isDark.value ? typeof themes[0] === 'string' ? themes[0] : (themes[0] as any).name : typeof themes[1] === 'string' ? themes[1] : (themes[1] as any).name)
   let themeWatcher: WatchStopHandle | null = null
+
+  // 在创建编辑器之前执行用户自定义逻辑
+  if (monacoOptions.onBeforeCreate) {
+    const disposal = monacoOptions.onBeforeCreate(monaco)
+    if (disposal)
+      disposals.push(...disposal)
+  }
   async function createEditor(container: HTMLElement, code: string, language: string) {
     cleanupEditor()
     lastContainer = container
@@ -298,29 +338,3 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
 export {
   detectLanguage,
 }
-
-// import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
-// import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
-// import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
-// import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
-// import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
-// // @ts-expect-error monaco global is not defined in this context
-// globalThis.MonacoEnvironment = {
-//   getWorker(_: any, label: string) {
-//     if (label === 'json') {
-//       return new JsonWorker()
-//     }
-//     if (label === 'css' || label === 'scss' || label === 'less') {
-//       return new CssWorker()
-//     }
-//     if (label === 'html' || label === 'handlebars' || label === 'razor') {
-//       return new HtmlWorker()
-//     }
-//     if (label === 'typescript' || label === 'javascript') {
-//       return new TsWorker()
-//     }
-//     return new EditorWorker()
-//   },
-// }
-
-// monaco.languages.typescript.typescriptDefaults.setEagerModelSync(true)
