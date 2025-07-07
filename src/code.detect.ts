@@ -37,17 +37,17 @@ export type CodeLanguage =
 /**
  * Language detection feature with pattern and score
  */
-type LanguageFeature = [RegExp, number]
+export type LanguageFeature = [RegExp, number]
 
 /**
  * Language definition with identifier and detection features
  */
-type LanguageDefinition = [CodeLanguage, ...LanguageFeature[]]
+export type LanguageDefinition = [CodeLanguage, ...LanguageFeature[]]
 
 /**
  * Language detection definitions
  */
-const languages: LanguageDefinition[] = [
+export const languages: LanguageDefinition[] = [
   ['bash', [/#!(\/usr)?\/bin\/bash/g, 500], [/\b(if|elif|then|fi|echo)\b|\$/g, 10]],
   ['html', [/<\/?[a-z-][^\n>]*>/g, 10], [/^\s+<!DOCTYPE\s+html/g, 500]],
   ['http', [/^(GET|HEAD|POST|PUT|DELETE|PATCH|HTTP)\b/g, 500]],
@@ -99,11 +99,14 @@ const languages: LanguageDefinition[] = [
  * Try to find the language the given code belongs to
  *
  * @param {string} code The code to analyze
+ * @param {LanguageDefinition[]} [additionalLanguages] Additional language definitions to supplement the built-in ones
  * @returns {CodeLanguage} The detected language of the code
  */
-export function detectLanguage(code: string): CodeLanguage {
+export function detectLanguage(code: string, additionalLanguages?: LanguageDefinition[]): CodeLanguage {
+  const allLanguages = additionalLanguages ? [...languages, ...additionalLanguages] : languages
+
   return (
-    languages
+    allLanguages
       .map(
         ([lang, ...features]) =>
           [
@@ -128,3 +131,29 @@ export function processedLanguage(language: string) {
     return 'powershell'
   return language.split(':')[0]
 }
+
+/**
+ * 使用示例:
+ *
+ * // 基本用法
+ * const language1 = detectLanguage('console.log("hello")') // 'js'
+ *
+ * // 使用自定义语言检测规则
+ * const customLanguages: LanguageDefinition[] = [
+ *   ['vue', [/<template>/g, 100], [/<script>/g, 50], [/<style>/g, 50]],
+ *   ['kotlin', [/\b(fun|class|val|var)\b/g, 20]]
+ * ]
+ *
+ * const language2 = detectLanguage(`
+ *   <template>
+ *     <div>Hello Vue</div>
+ *   </template>
+ * `, customLanguages) // 'vue'
+ *
+ * const language3 = detectLanguage(`
+ *   fun main() {
+ *     val name = "Kotlin"
+ *     println("Hello $name")
+ *   }
+ * `, customLanguages) // 'kotlin'
+ */

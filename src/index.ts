@@ -54,7 +54,7 @@ export type MonacoTheme = | 'andromeeda' | 'aurora-x' | 'ayu-dark' | 'catppuccin
 export type MonacoLanguage = | 'abap' | 'actionscript-3' | 'ada' | 'angular-html' | 'angular-ts' | 'apache' | 'apex' | 'apl' | 'applescript' | 'ara' | 'asciidoc' | 'asm' | 'astro' | 'awk' | 'ballerina' | 'bat' | 'beancount' | 'berry' | 'bibtex' | 'bicep' | 'blade' | 'bsl' | 'c' | 'cadence' | 'cairo' | 'clarity' | 'clojure' | 'cmake' | 'cobol' | 'codeowners' | 'codeql' | 'coffee' | 'common-lisp' | 'coq' | 'cpp' | 'crystal' | 'csharp' | 'css' | 'csv' | 'cue' | 'cypher' | 'd' | 'dart' | 'dax' | 'desktop' | 'diff' | 'docker' | 'dotenv' | 'dream-maker' | 'edge' | 'elixir' | 'elm' | 'emacs-lisp' | 'erb' | 'erlang' | 'fennel' | 'fish' | 'fluent' | 'fortran-fixed-form' | 'fortran-free-form' | 'fsharp' | 'gdresource' | 'gdscript' | 'gdshader' | 'genie' | 'gherkin' | 'git-commit' | 'git-rebase' | 'gleam' | 'glimmer-js' | 'glimmer-ts' | 'glsl' | 'gnuplot' | 'go' | 'graphql' | 'groovy' | 'hack' | 'haml' | 'handlebars' | 'haskell' | 'haxe' | 'hcl' | 'hjson' | 'hlsl' | 'html' | 'html-derivative' | 'http' | 'hxml' | 'hy' | 'imba' | 'ini' | 'java' | 'javascript' | 'jinja' | 'jison' | 'json' | 'json5' | 'jsonc' | 'jsonl' | 'jsonnet' | 'jssm' | 'jsx' | 'julia' | 'kotlin' | 'kusto' | 'latex' | 'lean' | 'less' | 'liquid' | 'llvm' | 'log' | 'logo' | 'lua' | 'luau' | 'make' | 'markdown' | 'marko' | 'matlab' | 'mdc' | 'mdx' | 'mermaid' | 'mipsasm' | 'mojo' | 'move' | 'narrat' | 'nextflow' | 'nginx' | 'nim' | 'nix' | 'nushell' | 'objective-c' | 'objective-cpp' | 'ocaml' | 'pascal' | 'perl' | 'php' | 'plsql' | 'po' | 'polar' | 'postcss' | 'powerquery' | 'powershell' | 'prisma' | 'prolog' | 'proto' | 'pug' | 'puppet' | 'purescript' | 'python' | 'qml' | 'qmldir' | 'qss' | 'r' | 'racket' | 'raku' | 'razor' | 'reg' | 'regexp' | 'rel' | 'riscv' | 'rst' | 'ruby' | 'rust' | 'sas' | 'sass' | 'scala' | 'scheme' | 'scss' | 'sdbl' | 'shaderlab' | 'shellscript' | 'shellsession' | 'smalltalk' | 'solidity' | 'soy' | 'sparql' | 'splunk' | 'sql' | 'ssh-config' | 'stata' | 'stylus' | 'svelte' | 'swift' | 'system-verilog' | 'systemd' | 'talonscript' | 'tasl' | 'tcl' | 'templ' | 'terraform' | 'tex' | 'toml' | 'ts-tags' | 'tsv' | 'tsx' | 'turtle' | 'twig' | 'typescript' | 'typespec' | 'typst' | 'v' | 'vala' | 'vb' | 'verilog' | 'vhdl' | 'viml' | 'vue' | 'vue-html' | 'vyper' | 'wasm' | 'wenyan' | 'wgsl' | 'wikitext' | 'wit' | 'wolfram' | 'xml' | 'xsl' | 'yaml' | 'zenscript' | 'zig' | string
 
 export interface MonacoOptions extends monaco.editor.IStandaloneEditorConstructionOptions {
-  MAX_HEIGHT?: number
+  MAX_HEIGHT?: number | string
   readOnly?: boolean
   themes?: MonacoTheme[]
   languages?: MonacoLanguage[]
@@ -71,7 +71,7 @@ export interface MonacoOptions extends monaco.editor.IStandaloneEditorConstructi
  * 支持主题自动切换、语言高亮、代码更新等功能。
  *
  * @param {MonacoOptions} [monacoOptions] - 编辑器初始化配置，支持 Monaco 原生配置及扩展项
- * @param {number} [monacoOptions.MAX_HEIGHT] - 编辑器最大高度（像素）
+ * @param {number | string} [monacoOptions.MAX_HEIGHT] - 编辑器最大高度，可以是数字（像素）或 CSS 字符串（如 '100%', 'calc(100vh - 100px)'）
  * @param {boolean} [monacoOptions.readOnly] - 是否为只读模式
  * @param {MonacoTheme[]} [monacoOptions.themes] - 主题数组，至少包含两个主题：[暗色主题, 亮色主题]
  * @param {MonacoLanguage[]} [monacoOptions.languages] - 支持的编程语言数组
@@ -175,6 +175,26 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     'nginx',
   ]
   const MAX_HEIGHT = monacoOptions.MAX_HEIGHT ?? 500
+
+  // 处理 MAX_HEIGHT，转换为数值和CSS字符串
+  const getMaxHeightValue = (): number => {
+    if (typeof MAX_HEIGHT === 'number') {
+      return MAX_HEIGHT
+    }
+    // 如果是字符串，尝试解析数值部分（用于高度比较）
+    const match = MAX_HEIGHT.match(/^(\d+(?:\.\d+)?)/)
+    return match ? Number.parseFloat(match[1]) : 500 // 默认值
+  }
+
+  const getMaxHeightCSS = (): string => {
+    if (typeof MAX_HEIGHT === 'number') {
+      return `${MAX_HEIGHT}px`
+    }
+    return MAX_HEIGHT
+  }
+
+  const maxHeightValue = getMaxHeightValue()
+  const maxHeightCSS = getMaxHeightCSS()
   let lastContainer: HTMLElement | null = null
   const currentTheme = computed<string>(() => isDark.value ? typeof themes[0] === 'string' ? themes[0] : (themes[0] as any).name : typeof themes[1] === 'string' ? themes[1] : (themes[1] as any).name)
   let themeWatcher: WatchStopHandle | null = null
@@ -202,7 +222,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     await themeRegisterPromise
 
     container.style.overflow = 'auto'
-    container.style.maxHeight = `${MAX_HEIGHT}px`
+    container.style.maxHeight = maxHeightCSS
     const defaultScrollbar = {
       verticalScrollbarSize: 8,
       horizontalScrollbarSize: 8,
@@ -232,7 +252,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     function updateHeight() {
       const lineCount = editorView!.getModel()?.getLineCount() ?? 1
       const lineHeight = editorView!.getOption(monaco.editor.EditorOption.lineHeight)
-      const height = Math.min(lineCount * lineHeight + 16, MAX_HEIGHT)
+      const height = Math.min(lineCount * lineHeight + 16, maxHeightValue)
       container.style.height = `${height}px`
     }
 
@@ -242,7 +262,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     // Scroll to the bottom if initialized with a scrollbar
     const model = editorView.getModel()
     const lineCount = model?.getLineCount() ?? 1
-    if (container.scrollHeight >= MAX_HEIGHT) {
+    if (container.scrollHeight >= maxHeightValue) {
       editorView.revealLine(lineCount)
     }
 
@@ -297,7 +317,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       if (
         newLineCount !== prevLineCount
         && container
-        && container.scrollHeight >= MAX_HEIGHT
+        && container.scrollHeight >= maxHeightValue
       ) {
         editorView.revealLine(newLineCount)
       }
