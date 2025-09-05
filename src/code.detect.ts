@@ -48,7 +48,11 @@ export type LanguageDefinition = [CodeLanguage, ...LanguageFeature[]]
  * Language detection definitions
  */
 export const languages: LanguageDefinition[] = [
-  ['bash', [/#!(\/usr)?\/bin\/bash/g, 500], [/\b(if|elif|then|fi|echo)\b|\$/g, 10]],
+  [
+    'bash',
+    [/#!(\/usr)?\/bin\/bash/g, 500],
+    [/\b(if|elif|then|fi|echo)\b|\$/g, 10],
+  ],
   ['html', [/<\/?[a-z-][^\n>]*>/g, 10], [/^\s+<!DOCTYPE\s+html/g, 500]],
   ['http', [/^(GET|HEAD|POST|PUT|DELETE|PATCH|HTTP)\b/g, 500]],
   [
@@ -69,7 +73,10 @@ export const languages: LanguageDefinition[] = [
   ['sql', [/\b(SELECT|INSERT|FROM)\b/g, 50]],
   ['pl', [/#!(\/usr)?\/bin\/perl/g, 500], [/\b(use|print)\b|\$/g, 10]],
   ['lua', [/#!(\/usr)?\/bin\/lua/g, 500]],
-  ['make', [/\b(ifneq|endif|if|elif|then|fi|echo|.PHONY|^[a-z]+ ?:$)\b|\$/gm, 10]],
+  [
+    'make',
+    [/\b(ifneq|endif|if|elif|then|fi|echo|.PHONY|^[a-z]+ ?:$)\b|\$/gm, 10],
+  ],
   ['uri', [/https?:|mailto:|tel:|ftp:/g, 30]],
   ['css', [/^(@import|@page|@media|(\.|#)[a-z]+)/gm, 20]],
   ['diff', [/^[+><-]/gm, 10], [/^@@[-+,0-9 ]+@@/gm, 25]],
@@ -102,8 +109,13 @@ export const languages: LanguageDefinition[] = [
  * @param {LanguageDefinition[]} [additionalLanguages] Additional language definitions to supplement the built-in ones
  * @returns {CodeLanguage} The detected language of the code
  */
-export function detectLanguage(code: string, additionalLanguages?: LanguageDefinition[]): CodeLanguage {
-  const allLanguages = additionalLanguages ? [...languages, ...additionalLanguages] : languages
+export function detectLanguage(
+  code: string,
+  additionalLanguages?: LanguageDefinition[],
+): CodeLanguage {
+  const allLanguages = additionalLanguages
+    ? [...languages, ...additionalLanguages]
+    : languages
 
   return (
     allLanguages

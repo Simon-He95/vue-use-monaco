@@ -57,7 +57,7 @@ const { createEditor, updateCode, cleanupEditor } = useMonaco({
   themes: ['vitesse-dark', 'vitesse-light'],
   languages: ['javascript', 'typescript', 'vue', 'python'],
   readOnly: false,
-  MAX_HEIGHT: 600
+  MAX_HEIGHT: 600,
 })
 
 // 创建编辑器实例
@@ -72,7 +72,7 @@ watch(
   () => [props.code, props.language],
   ([newCode, newLanguage]) => {
     updateCode(newCode, newLanguage)
-  }
+  },
 )
 </script>
 
@@ -106,7 +106,7 @@ const {
   getCurrentTheme,
   getEditor,
   getEditorView,
-  cleanupEditor
+  cleanupEditor,
 } = useMonaco({
   // 主题配置 - 至少需要两个主题（暗色/亮色）
   themes: ['github-dark', 'github-light'],
@@ -138,8 +138,8 @@ const {
   scrollbar: {
     verticalScrollbarSize: 10,
     horizontalScrollbarSize: 10,
-    alwaysConsumeMouseWheel: false
-  }
+    alwaysConsumeMouseWheel: false,
+  },
 })
 
 onMounted(async () => {
@@ -147,7 +147,7 @@ onMounted(async () => {
     const editor = await createEditor(
       editorContainer.value,
       'console.log("Hello, Monaco!")',
-      'javascript'
+      'javascript',
     )
 
     console.log('Editor created:', editor)
@@ -209,32 +209,33 @@ console.log('Editor instance:', editorInstance)
 
 ##### 参数
 
-| 参数 | 类型 | 默认值 | 描述 |
-|------|------|--------|------|
-| `MAX_HEIGHT` | `number` | `500` | 编辑器最大高度（像素） |
-| `readOnly` | `boolean` | `true` | 是否为只读模式 |
-| `themes` | `MonacoTheme[]` | `['vitesse-dark', 'vitesse-light']` | 主题数组，至少包含两个主题 |
-| `languages` | `MonacoLanguage[]` | 见默认语言列表 | 支持的编程语言数组 |
-| `theme` | `string` | - | 初始主题名称 |
-| `isCleanOnBeforeCreate` | `boolean` | `true` | 是否在创建前清理之前注册的资源 |
-| `onBeforeCreate` | `function` | - | 编辑器创建前的钩子函数 |
+| 参数                    | 类型               | 默认值                              | 描述                           |
+| ----------------------- | ------------------ | ----------------------------------- | ------------------------------ |
+| `MAX_HEIGHT`            | `number`           | `500`                               | 编辑器最大高度（像素）         |
+| `readOnly`              | `boolean`          | `true`                              | 是否为只读模式                 |
+| `themes`                | `MonacoTheme[]`    | `['vitesse-dark', 'vitesse-light']` | 主题数组，至少包含两个主题     |
+| `languages`             | `MonacoLanguage[]` | 见默认语言列表                      | 支持的编程语言数组             |
+| `theme`                 | `string`           | -                                   | 初始主题名称                   |
+| `isCleanOnBeforeCreate` | `boolean`          | `true`                              | 是否在创建前清理之前注册的资源 |
+| `onBeforeCreate`        | `function`         | -                                   | 编辑器创建前的钩子函数         |
 
 ##### 返回值
 
-| 方法/属性 | 类型 | 描述 |
-|-----------|------|------|
-| `createEditor` | `(container: HTMLElement, code: string, language: string) => Promise<MonacoEditor>` | 创建并挂载编辑器到指定容器 |
-| `cleanupEditor` | `() => void` | 销毁编辑器并清理容器 |
-| `updateCode` | `(newCode: string, codeLanguage: string) => void` | 更新编辑器内容和语言 |
-| `setTheme` | `(theme: MonacoTheme) => void` | 切换编辑器主题 |
-| `setLanguage` | `(language: MonacoLanguage) => void` | 切换编辑器语言 |
-| `getCurrentTheme` | `() => string` | 获取当前主题名称 |
-| `getEditor` | `() => typeof monaco.editor` | 获取 Monaco 的静态 editor 对象 |
-| `getEditorView` | `() => MonacoEditor \| null` | 获取当前编辑器实例 |
+| 方法/属性         | 类型                                                                                | 描述                           |
+| ----------------- | ----------------------------------------------------------------------------------- | ------------------------------ |
+| `createEditor`    | `(container: HTMLElement, code: string, language: string) => Promise<MonacoEditor>` | 创建并挂载编辑器到指定容器     |
+| `cleanupEditor`   | `() => void`                                                                        | 销毁编辑器并清理容器           |
+| `updateCode`      | `(newCode: string, codeLanguage: string) => void`                                   | 更新编辑器内容和语言           |
+| `setTheme`        | `(theme: MonacoTheme) => void`                                                      | 切换编辑器主题                 |
+| `setLanguage`     | `(language: MonacoLanguage) => void`                                                | 切换编辑器语言                 |
+| `getCurrentTheme` | `() => string`                                                                      | 获取当前主题名称               |
+| `getEditor`       | `() => typeof monaco.editor`                                                        | 获取 Monaco 的静态 editor 对象 |
+| `getEditorView`   | `() => MonacoEditor \| null`                                                        | 获取当前编辑器实例             |
 
 #### 支持的主题
 
 包括但不限于：
+
 - `vitesse-dark` / `vitesse-light`
 - `github-dark` / `github-light`
 - `dracula` / `dracula-soft`
@@ -247,6 +248,7 @@ console.log('Editor instance:', editorInstance)
 #### 支持的语言
 
 包括但不限于：
+
 - `javascript` / `typescript` / `jsx` / `tsx`
 - `vue` / `html` / `css` / `scss` / `less`
 - `python` / `java` / `csharp` / `cpp` / `rust` / `go`
@@ -297,9 +299,9 @@ const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin')
 module.exports = {
   plugins: [
     new MonacoWebpackPlugin({
-      languages: ['javascript', 'typescript', 'css', 'html', 'json']
-    })
-  ]
+      languages: ['javascript', 'typescript', 'css', 'html', 'json'],
+    }),
+  ],
 }
 ```
 
@@ -311,7 +313,7 @@ module.exports = {
 // 只加载需要的语言，减少包体积
 const { createEditor } = useMonaco({
   languages: ['javascript', 'typescript'], // 只加载必要的语言
-  themes: ['vitesse-dark', 'vitesse-light']
+  themes: ['vitesse-dark', 'vitesse-light'],
 })
 ```
 
@@ -339,7 +341,7 @@ import { useDark } from '@vueuse/core'
 const isDark = useDark()
 
 const { createEditor, setTheme } = useMonaco({
-  themes: ['github-dark', 'github-light']
+  themes: ['github-dark', 'github-light'],
 })
 
 // 主题会自动跟随 isDark 状态切换
