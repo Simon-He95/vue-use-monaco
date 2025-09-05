@@ -1,7 +1,7 @@
 {
   "name": "vue-use-monaco",
   "type": "module",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "packageManager": "pnpm@10.15.1",
   "description": "A Vue library for integrating Monaco Editor with Shiki syntax highlighting, supporting real-time updates.",
   "author": "Simon He",
