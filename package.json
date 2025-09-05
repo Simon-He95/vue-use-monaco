@@ -64,24 +64,24 @@
   },
   "dependencies": {
     "@shikijs/monaco": "^3.12.2",
+    "@vueuse/core": "^13.9.0",
     "monaco-editor": "^0.52.2",
-    "shiki": "^3.12.2"
+    "shiki": "^3.12.2",
+    "vue": "^3.5.21"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^3.16.0",
+    "@antfu/eslint-config": "^5.2.2",
     "@types/node": "^18.19.124",
-    "@vueuse/core": "^13.9.0",
     "bumpp": "^8.2.1",
-    "eslint": "^9.34.0",
+    "eslint": "^9.35.0",
     "lint-staged": "^13.3.0",
     "picocolors": "^1.1.1",
     "prettier": "^2.8.8",
     "rimraf": "^3.0.2",
     "tsdown": "^0.12.9",
     "tsx": "^3.14.0",
-    "typescript": "^4.9.5",
-    "vitest": "^0.15.2",
-    "vue": "^3.5.21"
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
   },
   "lint-staged": {
     "*": [
