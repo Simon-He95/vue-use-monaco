@@ -584,6 +584,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       },
       {
         flush: 'post',
+        immediate: true,
       },
     )
 
