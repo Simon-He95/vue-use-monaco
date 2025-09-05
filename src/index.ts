@@ -19,6 +19,17 @@ let currentThemes: (ThemeInput | string | SpecialTheme)[] = []
 let currentLanguages: string[] = []
 const disposals: monaco.IDisposable[] = []
 
+// shallow array equality (order-sensitive)
+function arraysEqual<T>(a: readonly T[] | null | undefined, b: readonly T[] | null | undefined) {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
 async function registerMonacoThemes(
   themes: (ThemeInput | string | SpecialTheme)[],
   languages: string[],
@@ -26,8 +37,8 @@ async function registerMonacoThemes(
   registerMonacoLanguages(languages)
   if (
     themesRegistered
-    && JSON.stringify(themes) === JSON.stringify(currentThemes)
-    && JSON.stringify(languages) === JSON.stringify(currentLanguages)
+    && arraysEqual(themes, currentThemes)
+    && arraysEqual(languages, currentLanguages)
   ) {
     return
   }
@@ -44,7 +55,7 @@ async function registerMonacoThemes(
 function registerMonacoLanguages(languages: string[]) {
   if (
     languagesRegistered
-    && JSON.stringify(languages) === JSON.stringify(currentLanguages)
+    && arraysEqual(languages, currentLanguages)
   ) {
     return
   }
@@ -420,17 +431,14 @@ const defaultLanguages = [
   'csharp',
   'python',
   'java',
-  'kotlin',
   'c',
   'cpp',
   'rust',
   'go',
   'powershell',
   'sql',
-  'yaml',
   'json',
   'html',
-  'css',
   'javascript',
   'typescript',
   'css',
@@ -457,6 +465,16 @@ const defaultLanguages = [
   'nginx',
 ]
 const defaultThemes: MonacoTheme[] = ['vitesse-dark', 'vitesse-light']
+const defaultScrollbar = {
+  verticalScrollbarSize: 8,
+  horizontalScrollbarSize: 8,
+  handleMouseWheel: true,
+  /**
+   * 是否始终消费鼠标滚轮事件，默认为 false
+   * 如果为 true，则鼠标滚轮事件不会传递给其他元素
+   */
+  alwaysConsumeMouseWheel: false,
+}
 export function useMonaco(monacoOptions: MonacoOptions = {}) {
   // 清除之前在 onBeforeCreate 中注册的资源
   if (monacoOptions.isCleanOnBeforeCreate ?? true)
@@ -530,16 +548,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
 
     container.style.overflow = 'auto'
     container.style.maxHeight = maxHeightCSS
-    const defaultScrollbar = {
-      verticalScrollbarSize: 8,
-      horizontalScrollbarSize: 8,
-      handleMouseWheel: true,
-      /**
-       * 是否始终消费鼠标滚轮事件，默认为 false
-       * 如果为 true，则鼠标滚轮事件不会传递给其他元素
-       */
-      alwaysConsumeMouseWheel: false,
-    }
+
     editorView = monaco.editor.create(container, {
       value: code,
       language: processedLanguage(language) || language,
