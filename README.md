@@ -185,18 +185,10 @@ console.log('Editor instance:', editorInstance)
 <template>
   <div>
     <div class="controls">
-      <button @click="switchTheme('github-dark')">
-        暗色主题
-      </button>
-      <button @click="switchTheme('github-light')">
-        亮色主题
-      </button>
-      <button @click="switchLanguage('typescript')">
-        TypeScript
-      </button>
-      <button @click="switchLanguage('python')">
-        Python
-      </button>
+      <button @click="switchTheme('github-dark')">暗色主题</button>
+      <button @click="switchTheme('github-light')">亮色主题</button>
+      <button @click="switchLanguage('typescript')">TypeScript</button>
+      <button @click="switchLanguage('python')">Python</button>
     </div>
     <div ref="editorContainer" class="editor" />
   </div>

@@ -9,6 +9,61 @@ import { computed, onUnmounted, watch } from 'vue'
 import { detectLanguage, processedLanguage } from './code.detect'
 import { isDark } from './isDark'
 
+// eslint-disable-next-line no-restricted-globals
+if (typeof window !== 'undefined' && typeof self !== 'undefined') {
+  // eslint-disable-next-line no-restricted-globals
+  ;(self as any).MonacoEnvironment = {
+    getWorker(_: any, label: string) {
+      if (label === 'json') {
+        return new Worker(
+          new URL(
+            'monaco-editor/esm/vs/language/json/json.worker.js',
+            import.meta.url,
+          ),
+          { type: 'module' },
+        )
+      }
+      if (label === 'css' || label === 'scss' || label === 'less') {
+        return new Worker(
+          new URL(
+            'monaco-editor/esm/vs/language/css/css.worker.js',
+            import.meta.url,
+          ),
+          { type: 'module' },
+        )
+      }
+      if (label === 'html' || label === 'handlebars' || label === 'razor') {
+        return new Worker(
+          new URL(
+            'monaco-editor/esm/vs/language/html/html.worker.js',
+            import.meta.url,
+          ),
+          { type: 'module' },
+        )
+      }
+      if (label === 'typescript' || label === 'javascript') {
+        return new Worker(
+          new URL(
+            'monaco-editor/esm/vs/language/typescript/ts.worker.js',
+            import.meta.url,
+          ),
+          { type: 'module' },
+        )
+      }
+      return new Worker(
+        new URL(
+          'monaco-editor/esm/vs/editor/editor.worker.js',
+          import.meta.url,
+        ),
+        { type: 'module' },
+      )
+    },
+  }
+
+  // Improve TS/JS model sync to support features like diagnostics without delay
+  monaco.languages.typescript.typescriptDefaults.setEagerModelSync(true)
+}
+
 export type MonacoEditorInstance = monaco.editor.IStandaloneCodeEditor
 export type { ThemeInput }
 
@@ -20,16 +75,15 @@ let currentLanguages: string[] = []
 const disposals: monaco.IDisposable[] = []
 
 // shallow array equality (order-sensitive)
-function arraysEqual<T>(a: readonly T[] | null | undefined, b: readonly T[] | null | undefined) {
-  if (a === b)
-    return true
-  if (!a || !b)
-    return false
-  if (a.length !== b.length)
-    return false
+function arraysEqual<T>(
+  a: readonly T[] | null | undefined,
+  b: readonly T[] | null | undefined,
+) {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i])
-      return false
+    if (a[i] !== b[i]) return false
   }
   return true
 }
@@ -40,9 +94,9 @@ async function registerMonacoThemes(
 ) {
   registerMonacoLanguages(languages)
   if (
-    themesRegistered
-    && arraysEqual(themes, currentThemes)
-    && arraysEqual(languages, currentLanguages)
+    themesRegistered &&
+    arraysEqual(themes, currentThemes) &&
+    arraysEqual(languages, currentLanguages)
   ) {
     return
   }
@@ -57,10 +111,7 @@ async function registerMonacoThemes(
 }
 
 function registerMonacoLanguages(languages: string[]) {
-  if (
-    languagesRegistered
-    && arraysEqual(languages, currentLanguages)
-  ) {
+  if (languagesRegistered && arraysEqual(languages, currentLanguages)) {
     return
   }
   languagesRegistered = true
@@ -70,292 +121,292 @@ function registerMonacoLanguages(languages: string[]) {
   }
 }
 
-export type MonacoTheme
-  = | 'andromeeda'
-    | 'aurora-x'
-    | 'ayu-dark'
-    | 'catppuccin-frappe'
-    | 'catppuccin-latte'
-    | 'catppuccin-macchiato'
-    | 'catppuccin-mocha'
-    | 'dark-plus'
-    | 'dracula'
-    | 'dracula-soft'
-    | 'everforest-dark'
-    | 'everforest-light'
-    | 'github-dark'
-    | 'github-dark-default'
-    | 'github-dark-dimmed'
-    | 'github-dark-high-contrast'
-    | 'github-light'
-    | 'github-light-default'
-    | 'github-light-high-contrast'
-    | 'gruvbox-dark-hard'
-    | 'gruvbox-dark-medium'
-    | 'gruvbox-dark-soft'
-    | 'gruvbox-light-hard'
-    | 'gruvbox-light-medium'
-    | 'gruvbox-light-soft'
-    | 'houston'
-    | 'kanagawa-dragon'
-    | 'kanagawa-lotus'
-    | 'kanagawa-wave'
-    | 'laserwave'
-    | 'light-plus'
-    | 'material-theme'
-    | 'material-theme-darker'
-    | 'material-theme-lighter'
-    | 'material-theme-ocean'
-    | 'material-theme-palenight'
-    | 'min-dark'
-    | 'min-light'
-    | 'monokai'
-    | 'night-owl'
-    | 'nord'
-    | 'one-dark-pro'
-    | 'one-light'
-    | 'plastic'
-    | 'poimandres'
-    | 'red'
-    | 'rose-pine'
-    | 'rose-pine-dawn'
-    | 'rose-pine-moon'
-    | 'slack-dark'
-    | 'slack-ochin'
-    | 'snazzy-light'
-    | 'solarized-dark'
-    | 'solarized-light'
-    | 'synthwave-84'
-    | 'tokyo-night'
-    | 'vesper'
-    | 'vitesse-black'
-    | 'vitesse-dark'
-    | 'vitesse-light'
-    | ThemeInput
-    | string
-    | SpecialTheme
-export type MonacoLanguage
-  = | 'abap'
-    | 'actionscript-3'
-    | 'ada'
-    | 'angular-html'
-    | 'angular-ts'
-    | 'apache'
-    | 'apex'
-    | 'apl'
-    | 'applescript'
-    | 'ara'
-    | 'asciidoc'
-    | 'asm'
-    | 'astro'
-    | 'awk'
-    | 'ballerina'
-    | 'bat'
-    | 'beancount'
-    | 'berry'
-    | 'bibtex'
-    | 'bicep'
-    | 'blade'
-    | 'bsl'
-    | 'c'
-    | 'cadence'
-    | 'cairo'
-    | 'clarity'
-    | 'clojure'
-    | 'cmake'
-    | 'cobol'
-    | 'codeowners'
-    | 'codeql'
-    | 'coffee'
-    | 'common-lisp'
-    | 'coq'
-    | 'cpp'
-    | 'crystal'
-    | 'csharp'
-    | 'css'
-    | 'csv'
-    | 'cue'
-    | 'cypher'
-    | 'd'
-    | 'dart'
-    | 'dax'
-    | 'desktop'
-    | 'diff'
-    | 'docker'
-    | 'dotenv'
-    | 'dream-maker'
-    | 'edge'
-    | 'elixir'
-    | 'elm'
-    | 'emacs-lisp'
-    | 'erb'
-    | 'erlang'
-    | 'fennel'
-    | 'fish'
-    | 'fluent'
-    | 'fortran-fixed-form'
-    | 'fortran-free-form'
-    | 'fsharp'
-    | 'gdresource'
-    | 'gdscript'
-    | 'gdshader'
-    | 'genie'
-    | 'gherkin'
-    | 'git-commit'
-    | 'git-rebase'
-    | 'gleam'
-    | 'glimmer-js'
-    | 'glimmer-ts'
-    | 'glsl'
-    | 'gnuplot'
-    | 'go'
-    | 'graphql'
-    | 'groovy'
-    | 'hack'
-    | 'haml'
-    | 'handlebars'
-    | 'haskell'
-    | 'haxe'
-    | 'hcl'
-    | 'hjson'
-    | 'hlsl'
-    | 'html'
-    | 'html-derivative'
-    | 'http'
-    | 'hxml'
-    | 'hy'
-    | 'imba'
-    | 'ini'
-    | 'java'
-    | 'javascript'
-    | 'jinja'
-    | 'jison'
-    | 'json'
-    | 'json5'
-    | 'jsonc'
-    | 'jsonl'
-    | 'jsonnet'
-    | 'jssm'
-    | 'jsx'
-    | 'julia'
-    | 'kotlin'
-    | 'kusto'
-    | 'latex'
-    | 'lean'
-    | 'less'
-    | 'liquid'
-    | 'llvm'
-    | 'log'
-    | 'logo'
-    | 'lua'
-    | 'luau'
-    | 'make'
-    | 'markdown'
-    | 'marko'
-    | 'matlab'
-    | 'mdc'
-    | 'mdx'
-    | 'mermaid'
-    | 'mipsasm'
-    | 'mojo'
-    | 'move'
-    | 'narrat'
-    | 'nextflow'
-    | 'nginx'
-    | 'nim'
-    | 'nix'
-    | 'nushell'
-    | 'objective-c'
-    | 'objective-cpp'
-    | 'ocaml'
-    | 'pascal'
-    | 'perl'
-    | 'php'
-    | 'plsql'
-    | 'po'
-    | 'polar'
-    | 'postcss'
-    | 'powerquery'
-    | 'powershell'
-    | 'prisma'
-    | 'prolog'
-    | 'proto'
-    | 'pug'
-    | 'puppet'
-    | 'purescript'
-    | 'python'
-    | 'qml'
-    | 'qmldir'
-    | 'qss'
-    | 'r'
-    | 'racket'
-    | 'raku'
-    | 'razor'
-    | 'reg'
-    | 'regexp'
-    | 'rel'
-    | 'riscv'
-    | 'rst'
-    | 'ruby'
-    | 'rust'
-    | 'sas'
-    | 'sass'
-    | 'scala'
-    | 'scheme'
-    | 'scss'
-    | 'sdbl'
-    | 'shaderlab'
-    | 'shellscript'
-    | 'shellsession'
-    | 'smalltalk'
-    | 'solidity'
-    | 'soy'
-    | 'sparql'
-    | 'splunk'
-    | 'sql'
-    | 'ssh-config'
-    | 'stata'
-    | 'stylus'
-    | 'svelte'
-    | 'swift'
-    | 'system-verilog'
-    | 'systemd'
-    | 'talonscript'
-    | 'tasl'
-    | 'tcl'
-    | 'templ'
-    | 'terraform'
-    | 'tex'
-    | 'toml'
-    | 'ts-tags'
-    | 'tsv'
-    | 'tsx'
-    | 'turtle'
-    | 'twig'
-    | 'typescript'
-    | 'typespec'
-    | 'typst'
-    | 'v'
-    | 'vala'
-    | 'vb'
-    | 'verilog'
-    | 'vhdl'
-    | 'viml'
-    | 'vue'
-    | 'vue-html'
-    | 'vyper'
-    | 'wasm'
-    | 'wenyan'
-    | 'wgsl'
-    | 'wikitext'
-    | 'wit'
-    | 'wolfram'
-    | 'xml'
-    | 'xsl'
-    | 'yaml'
-    | 'zenscript'
-    | 'zig'
-    | string
+export type MonacoTheme =
+  | 'andromeeda'
+  | 'aurora-x'
+  | 'ayu-dark'
+  | 'catppuccin-frappe'
+  | 'catppuccin-latte'
+  | 'catppuccin-macchiato'
+  | 'catppuccin-mocha'
+  | 'dark-plus'
+  | 'dracula'
+  | 'dracula-soft'
+  | 'everforest-dark'
+  | 'everforest-light'
+  | 'github-dark'
+  | 'github-dark-default'
+  | 'github-dark-dimmed'
+  | 'github-dark-high-contrast'
+  | 'github-light'
+  | 'github-light-default'
+  | 'github-light-high-contrast'
+  | 'gruvbox-dark-hard'
+  | 'gruvbox-dark-medium'
+  | 'gruvbox-dark-soft'
+  | 'gruvbox-light-hard'
+  | 'gruvbox-light-medium'
+  | 'gruvbox-light-soft'
+  | 'houston'
+  | 'kanagawa-dragon'
+  | 'kanagawa-lotus'
+  | 'kanagawa-wave'
+  | 'laserwave'
+  | 'light-plus'
+  | 'material-theme'
+  | 'material-theme-darker'
+  | 'material-theme-lighter'
+  | 'material-theme-ocean'
+  | 'material-theme-palenight'
+  | 'min-dark'
+  | 'min-light'
+  | 'monokai'
+  | 'night-owl'
+  | 'nord'
+  | 'one-dark-pro'
+  | 'one-light'
+  | 'plastic'
+  | 'poimandres'
+  | 'red'
+  | 'rose-pine'
+  | 'rose-pine-dawn'
+  | 'rose-pine-moon'
+  | 'slack-dark'
+  | 'slack-ochin'
+  | 'snazzy-light'
+  | 'solarized-dark'
+  | 'solarized-light'
+  | 'synthwave-84'
+  | 'tokyo-night'
+  | 'vesper'
+  | 'vitesse-black'
+  | 'vitesse-dark'
+  | 'vitesse-light'
+  | ThemeInput
+  | string
+  | SpecialTheme
+export type MonacoLanguage =
+  | 'abap'
+  | 'actionscript-3'
+  | 'ada'
+  | 'angular-html'
+  | 'angular-ts'
+  | 'apache'
+  | 'apex'
+  | 'apl'
+  | 'applescript'
+  | 'ara'
+  | 'asciidoc'
+  | 'asm'
+  | 'astro'
+  | 'awk'
+  | 'ballerina'
+  | 'bat'
+  | 'beancount'
+  | 'berry'
+  | 'bibtex'
+  | 'bicep'
+  | 'blade'
+  | 'bsl'
+  | 'c'
+  | 'cadence'
+  | 'cairo'
+  | 'clarity'
+  | 'clojure'
+  | 'cmake'
+  | 'cobol'
+  | 'codeowners'
+  | 'codeql'
+  | 'coffee'
+  | 'common-lisp'
+  | 'coq'
+  | 'cpp'
+  | 'crystal'
+  | 'csharp'
+  | 'css'
+  | 'csv'
+  | 'cue'
+  | 'cypher'
+  | 'd'
+  | 'dart'
+  | 'dax'
+  | 'desktop'
+  | 'diff'
+  | 'docker'
+  | 'dotenv'
+  | 'dream-maker'
+  | 'edge'
+  | 'elixir'
+  | 'elm'
+  | 'emacs-lisp'
+  | 'erb'
+  | 'erlang'
+  | 'fennel'
+  | 'fish'
+  | 'fluent'
+  | 'fortran-fixed-form'
+  | 'fortran-free-form'
+  | 'fsharp'
+  | 'gdresource'
+  | 'gdscript'
+  | 'gdshader'
+  | 'genie'
+  | 'gherkin'
+  | 'git-commit'
+  | 'git-rebase'
+  | 'gleam'
+  | 'glimmer-js'
+  | 'glimmer-ts'
+  | 'glsl'
+  | 'gnuplot'
+  | 'go'
+  | 'graphql'
+  | 'groovy'
+  | 'hack'
+  | 'haml'
+  | 'handlebars'
+  | 'haskell'
+  | 'haxe'
+  | 'hcl'
+  | 'hjson'
+  | 'hlsl'
+  | 'html'
+  | 'html-derivative'
+  | 'http'
+  | 'hxml'
+  | 'hy'
+  | 'imba'
+  | 'ini'
+  | 'java'
+  | 'javascript'
+  | 'jinja'
+  | 'jison'
+  | 'json'
+  | 'json5'
+  | 'jsonc'
+  | 'jsonl'
+  | 'jsonnet'
+  | 'jssm'
+  | 'jsx'
+  | 'julia'
+  | 'kotlin'
+  | 'kusto'
+  | 'latex'
+  | 'lean'
+  | 'less'
+  | 'liquid'
+  | 'llvm'
+  | 'log'
+  | 'logo'
+  | 'lua'
+  | 'luau'
+  | 'make'
+  | 'markdown'
+  | 'marko'
+  | 'matlab'
+  | 'mdc'
+  | 'mdx'
+  | 'mermaid'
+  | 'mipsasm'
+  | 'mojo'
+  | 'move'
+  | 'narrat'
+  | 'nextflow'
+  | 'nginx'
+  | 'nim'
+  | 'nix'
+  | 'nushell'
+  | 'objective-c'
+  | 'objective-cpp'
+  | 'ocaml'
+  | 'pascal'
+  | 'perl'
+  | 'php'
+  | 'plsql'
+  | 'po'
+  | 'polar'
+  | 'postcss'
+  | 'powerquery'
+  | 'powershell'
+  | 'prisma'
+  | 'prolog'
+  | 'proto'
+  | 'pug'
+  | 'puppet'
+  | 'purescript'
+  | 'python'
+  | 'qml'
+  | 'qmldir'
+  | 'qss'
+  | 'r'
+  | 'racket'
+  | 'raku'
+  | 'razor'
+  | 'reg'
+  | 'regexp'
+  | 'rel'
+  | 'riscv'
+  | 'rst'
+  | 'ruby'
+  | 'rust'
+  | 'sas'
+  | 'sass'
+  | 'scala'
+  | 'scheme'
+  | 'scss'
+  | 'sdbl'
+  | 'shaderlab'
+  | 'shellscript'
+  | 'shellsession'
+  | 'smalltalk'
+  | 'solidity'
+  | 'soy'
+  | 'sparql'
+  | 'splunk'
+  | 'sql'
+  | 'ssh-config'
+  | 'stata'
+  | 'stylus'
+  | 'svelte'
+  | 'swift'
+  | 'system-verilog'
+  | 'systemd'
+  | 'talonscript'
+  | 'tasl'
+  | 'tcl'
+  | 'templ'
+  | 'terraform'
+  | 'tex'
+  | 'toml'
+  | 'ts-tags'
+  | 'tsv'
+  | 'tsx'
+  | 'turtle'
+  | 'twig'
+  | 'typescript'
+  | 'typespec'
+  | 'typst'
+  | 'v'
+  | 'vala'
+  | 'vb'
+  | 'verilog'
+  | 'vhdl'
+  | 'viml'
+  | 'vue'
+  | 'vue-html'
+  | 'vyper'
+  | 'wasm'
+  | 'wenyan'
+  | 'wgsl'
+  | 'wikitext'
+  | 'wit'
+  | 'wolfram'
+  | 'xml'
+  | 'xsl'
+  | 'yaml'
+  | 'zenscript'
+  | 'zig'
+  | string
 
 export interface MonacoOptions
   extends monaco.editor.IStandaloneEditorConstructionOptions {
@@ -482,7 +533,7 @@ const defaultScrollbar = {
 export function useMonaco(monacoOptions: MonacoOptions = {}) {
   // 清除之前在 onBeforeCreate 中注册的资源
   if (monacoOptions.isCleanOnBeforeCreate ?? true)
-    disposals.forEach(d => d.dispose())
+    disposals.forEach((d) => d.dispose())
   let editorView: monaco.editor.IStandaloneCodeEditor | null = null
   const themes = monacoOptions.themes ?? defaultThemes
   if (!Array.isArray(themes) || themes.length < 2) {
@@ -519,16 +570,15 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
         ? themes[0]
         : (themes[0] as any).name
       : typeof themes[1] === 'string'
-        ? themes[1]
-        : (themes[1] as any).name,
+      ? themes[1]
+      : (themes[1] as any).name,
   )
   let themeWatcher: WatchStopHandle | null = null
 
   // 在创建编辑器之前执行用户自定义逻辑
   if (monacoOptions.onBeforeCreate) {
     const disposal = monacoOptions.onBeforeCreate(monaco)
-    if (disposal)
-      disposals.push(...disposal)
+    if (disposal) disposals.push(...disposal)
   }
   async function createEditor(
     container: HTMLElement,
@@ -626,20 +676,21 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     createEditor,
     cleanupEditor,
     updateCode(newCode: string, codeLanguage: string) {
-      if (!editorView)
-        return
+      if (!editorView) return
+
+      const model = editorView.getModel()
+      if (!model) return
       // 做一层拦截 如果 newCode 和当前代码相同，并且语言相同 则不更新
       const processedCodeLanguage = processedLanguage(codeLanguage)
+      const languageId = model.getLanguageId()
       if (
-        newCode === editorView.getValue()
-        && processedCodeLanguage === editorView.getModel()?.getLanguageId()
+        newCode === editorView.getValue() &&
+        processedCodeLanguage === languageId
       ) {
         return
       }
-      const model = editorView.getModel()
-      if (!model)
-        return
-      if (model.getLanguageId() !== processedCodeLanguage) {
+
+      if (languageId !== processedCodeLanguage) {
         monaco.editor.setModelLanguage(model, processedCodeLanguage)
       }
 
@@ -649,9 +700,9 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       // 只有行数变化且出现滚动条时才滚动到底部
       const container = editorView.getContainerDomNode?.()
       if (
-        newLineCount !== prevLineCount
-        && container
-        && container.scrollHeight >= maxHeightValue
+        newLineCount !== prevLineCount &&
+        container &&
+        container.scrollHeight >= maxHeightValue
       ) {
         editorView.revealLine(newLineCount)
       }
@@ -661,8 +712,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
         monaco.editor.setTheme(
           typeof theme === 'string' ? theme : (theme as any).name,
         )
-      }
-      else {
+      } else {
         console.warn(
           `Theme "${theme}" is not registered. Available themes: ${themes.join(
             ', ',
@@ -678,8 +728,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
             monaco.editor.setModelLanguage(model, language)
           }
         }
-      }
-      else {
+      } else {
         console.warn(
           `Language "${language}" is not registered. Available languages: ${languages.join(
             ', ',
