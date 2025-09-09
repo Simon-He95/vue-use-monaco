@@ -59,9 +59,6 @@ if (typeof window !== 'undefined' && typeof self !== 'undefined') {
       )
     },
   }
-
-  // Improve TS/JS model sync to support features like diagnostics without delay
-  monaco.languages.typescript.typescriptDefaults.setEagerModelSync(true)
 }
 
 export type MonacoEditorInstance = monaco.editor.IStandaloneCodeEditor
