@@ -561,6 +561,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
   const maxHeightValue = getMaxHeightValue()
   const maxHeightCSS = getMaxHeightCSS()
   let lastContainer: HTMLElement | null = null
+  let lastKnownCode: string | null = null
   const currentTheme = computed<string>(() =>
     isDark.value
       ? typeof themes[0] === 'string'
@@ -616,6 +617,9 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       ...monacoOptions,
     })
 
+    // 记录初始内容，便于后续增量判断
+    lastKnownCode = editorView.getValue()
+
     const padding = 16
     function updateHeight() {
       const lineCount = editorView!.getModel()?.getLineCount() ?? 1
@@ -659,6 +663,7 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       editorView.dispose()
       editorView = null
     }
+    lastKnownCode = null
     if (lastContainer) {
       lastContainer.innerHTML = ''
       lastContainer = null
@@ -669,32 +674,73 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     }
   }
 
-  return {
-    createEditor,
-    cleanupEditor,
-    updateCode(newCode: string, codeLanguage: string) {
-      if (!editorView) return
+  // 将 updateCode 和 appendCode 提升为闭包内函数，便于相互调用且避免 this 绑定问题
+  function appendCode(appendText: string, codeLanguage?: string) {
+    if (!editorView) return
+    const model = editorView.getModel()
+    if (!model) return
 
-      const model = editorView.getModel()
-      if (!model) return
-      // 做一层拦截 如果 newCode 和当前代码相同，并且语言相同 则不更新
-      const processedCodeLanguage = processedLanguage(codeLanguage)
-      const languageId = model.getLanguageId()
-      if (
-        newCode === editorView.getValue() &&
-        processedCodeLanguage === languageId
-      ) {
-        return
-      }
+    const processedCodeLanguage = codeLanguage
+      ? processedLanguage(codeLanguage)
+      : model.getLanguageId()
+    if (
+      processedCodeLanguage &&
+      model.getLanguageId() !== processedCodeLanguage
+    ) {
+      monaco.editor.setModelLanguage(model, processedCodeLanguage)
+    }
 
-      if (languageId !== processedCodeLanguage) {
+    // 计算插入位置：最后一行的末尾
+    const lastLine = model.getLineCount()
+    const lastColumn = model.getLineMaxColumn(lastLine)
+    const range = new monaco.Range(lastLine, lastColumn, lastLine, lastColumn)
+
+    // 如果编辑器是只读，executeEdits 不会生效，使用 model.applyEdits
+    const isReadOnly = editorView.getOption(monaco.editor.EditorOption.readOnly)
+    if (isReadOnly) {
+      model.applyEdits([
+        {
+          range,
+          text: appendText,
+          forceMoveMarkers: true,
+        },
+      ])
+    } else {
+      // 使用 executeEdits 保留 undo/redo，source 字符串可自定义
+      editorView.executeEdits('append', [
+        {
+          range,
+          text: appendText,
+          forceMoveMarkers: true,
+        },
+      ])
+    }
+
+    // 如果内容超过最大高度则滚动到底部
+    const newLine = model.getLineCount()
+    const container = editorView.getContainerDomNode?.()
+    if (container && container.scrollHeight >= maxHeightValue) {
+      editorView.revealLine(newLine)
+    }
+  }
+
+  function updateCode(newCode: string, codeLanguage: string) {
+    if (!editorView) return
+
+    const model = editorView.getModel()
+    if (!model) return
+
+    const processedCodeLanguage = processedLanguage(codeLanguage)
+    const languageId = model.getLanguageId()
+
+    // 如果语言不同，直接切换语言并全量替换（不尝试增量）
+    if (languageId !== processedCodeLanguage) {
+      if (processedCodeLanguage)
         monaco.editor.setModelLanguage(model, processedCodeLanguage)
-      }
-
       const prevLineCount = model.getLineCount()
       model.setValue(newCode)
+      lastKnownCode = newCode
       const newLineCount = model.getLineCount()
-      // 只有行数变化且出现滚动条时才滚动到底部
       const container = editorView.getContainerDomNode?.()
       if (
         newLineCount !== prevLineCount &&
@@ -703,7 +749,45 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       ) {
         editorView.revealLine(newLineCount)
       }
-    },
+      return
+    }
+
+    // 使用上一次记录的内容优先，否则回退到 editor 当前值
+    const prevCode = lastKnownCode ?? editorView.getValue()
+
+    // 如果完全相同则无需更新
+    if (prevCode === newCode) return
+
+    // 如果 newCode 以 prevCode 为前缀，则只追加后缀（优化）
+    if (newCode.startsWith(prevCode) && prevCode.length < newCode.length) {
+      const suffix = newCode.slice(prevCode.length)
+      if (suffix.length > 0) {
+        appendCode(suffix, codeLanguage)
+        lastKnownCode = newCode
+      }
+      return
+    }
+
+    // 其他情况回退为全量替换
+    const prevLineCount = model.getLineCount()
+    model.setValue(newCode)
+    lastKnownCode = newCode
+    const newLineCount = model.getLineCount()
+    const container = editorView.getContainerDomNode?.()
+    if (
+      newLineCount !== prevLineCount &&
+      container &&
+      container.scrollHeight >= maxHeightValue
+    ) {
+      editorView.revealLine(newLineCount)
+    }
+  }
+
+  return {
+    createEditor,
+    cleanupEditor,
+    updateCode,
+    appendCode,
     setTheme(theme: MonacoTheme) {
       if (themes.includes(theme)) {
         monaco.editor.setTheme(
