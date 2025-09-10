@@ -11,52 +11,71 @@ import { isDark } from './isDark'
 
 // eslint-disable-next-line no-restricted-globals
 if (typeof window !== 'undefined' && typeof self !== 'undefined') {
+  // Preload worker URLs once and reuse in getWorker
+  const workerUrlJson = new URL(
+    'monaco-editor/esm/vs/language/json/json.worker.js',
+    import.meta.url,
+  )
+  const workerUrlCss = new URL(
+    'monaco-editor/esm/vs/language/css/css.worker.js',
+    import.meta.url,
+  )
+  const workerUrlHtml = new URL(
+    'monaco-editor/esm/vs/language/html/html.worker.js',
+    import.meta.url,
+  )
+  const workerUrlTs = new URL(
+    'monaco-editor/esm/vs/language/typescript/ts.worker.js',
+    import.meta.url,
+  )
+  const workerUrlEditor = new URL(
+    'monaco-editor/esm/vs/editor/editor.worker.js',
+    import.meta.url,
+  )
+
+  const workerUrlByLabel: Record<string, URL> = {
+    json: workerUrlJson,
+    css: workerUrlCss,
+    scss: workerUrlCss,
+    less: workerUrlCss,
+    html: workerUrlHtml,
+    handlebars: workerUrlHtml,
+    razor: workerUrlHtml,
+    typescript: workerUrlTs,
+    javascript: workerUrlTs,
+  }
+
+  // Proactively preload worker modules to reduce first-use latency
+  try {
+    if (typeof document !== 'undefined') {
+      const uniqueUrls = new Set(
+        [
+          workerUrlJson,
+          workerUrlCss,
+          workerUrlHtml,
+          workerUrlTs,
+          workerUrlEditor,
+        ].map(String),
+      )
+      for (const href of uniqueUrls) {
+        if (
+          !document.querySelector(`link[rel="modulepreload"][href="${href}"]`)
+        ) {
+          const link = document.createElement('link')
+          link.rel = 'modulepreload'
+          link.href = href
+          // link.crossOrigin = 'anonymous' // uncomment if needed for CORS
+          document.head.appendChild(link)
+        }
+      }
+    }
+  } catch {}
+
   // eslint-disable-next-line no-restricted-globals
   ;(self as any).MonacoEnvironment = {
     getWorker(_: any, label: string) {
-      if (label === 'json') {
-        return new Worker(
-          new URL(
-            'monaco-editor/esm/vs/language/json/json.worker.js',
-            import.meta.url,
-          ),
-          { type: 'module' },
-        )
-      }
-      if (label === 'css' || label === 'scss' || label === 'less') {
-        return new Worker(
-          new URL(
-            'monaco-editor/esm/vs/language/css/css.worker.js',
-            import.meta.url,
-          ),
-          { type: 'module' },
-        )
-      }
-      if (label === 'html' || label === 'handlebars' || label === 'razor') {
-        return new Worker(
-          new URL(
-            'monaco-editor/esm/vs/language/html/html.worker.js',
-            import.meta.url,
-          ),
-          { type: 'module' },
-        )
-      }
-      if (label === 'typescript' || label === 'javascript') {
-        return new Worker(
-          new URL(
-            'monaco-editor/esm/vs/language/typescript/ts.worker.js',
-            import.meta.url,
-          ),
-          { type: 'module' },
-        )
-      }
-      return new Worker(
-        new URL(
-          'monaco-editor/esm/vs/editor/editor.worker.js',
-          import.meta.url,
-        ),
-        { type: 'module' },
-      )
+      const url = workerUrlByLabel[label] ?? workerUrlEditor
+      return new Worker(url, { type: 'module' })
     },
   }
 }
