@@ -9,9 +9,17 @@ import { computed, onUnmounted, watch } from 'vue'
 import { detectLanguage, processedLanguage } from './code.detect'
 import { isDark } from './isDark'
 
-// eslint-disable-next-line no-restricted-globals
-if (typeof window !== 'undefined' && typeof self !== 'undefined') {
-  // Preload worker URLs once and reuse in getWorker
+// Expose a function so consumers can proactively preload worker loaders
+// without relying on module evaluation timing.
+export async function preloadMonacoWorkers(options?: {
+  /**
+   * If true, also fetch each worker URL to warm the HTTP cache (best-effort).
+   */
+  fetch?: boolean
+}): Promise<void> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return
+
+  // Recreate the same URLs as used by MonacoEnvironment
   const workerUrlJson = new URL(
     'monaco-editor/esm/vs/language/json/json.worker.js',
     import.meta.url,
@@ -33,6 +41,16 @@ if (typeof window !== 'undefined' && typeof self !== 'undefined') {
     import.meta.url,
   )
 
+  const unique = Array.from(
+    new Set([
+      String(workerUrlJson),
+      String(workerUrlCss),
+      String(workerUrlHtml),
+      String(workerUrlTs),
+      String(workerUrlEditor),
+    ]),
+  )
+
   const workerUrlByLabel: Record<string, URL> = {
     json: workerUrlJson,
     css: workerUrlCss,
@@ -45,40 +63,41 @@ if (typeof window !== 'undefined' && typeof self !== 'undefined') {
     javascript: workerUrlTs,
   }
 
-  // Proactively preload worker modules to reduce first-use latency
   try {
-    if (typeof document !== 'undefined') {
-      const uniqueUrls = new Set(
-        [
-          workerUrlJson,
-          workerUrlCss,
-          workerUrlHtml,
-          workerUrlTs,
-          workerUrlEditor,
-        ].map(String),
-      )
-      for (const href of uniqueUrls) {
-        if (
-          !document.querySelector(`link[rel="modulepreload"][href="${href}"]`)
-        ) {
-          const link = document.createElement('link')
-          link.rel = 'modulepreload'
-          link.href = href
-          // link.crossOrigin = 'anonymous' // uncomment if needed for CORS
-          document.head.appendChild(link)
-        }
+    for (const href of unique) {
+      if (
+        !document.querySelector(`link[rel="modulepreload"][href="${href}"]`)
+      ) {
+        const link = document.createElement('link')
+        link.rel = 'modulepreload'
+        link.href = href
+        document.head.appendChild(link)
       }
     }
-  } catch {}
 
-  // eslint-disable-next-line no-restricted-globals
-  ;(self as any).MonacoEnvironment = {
-    getWorker(_: any, label: string) {
-      const url = workerUrlByLabel[label] ?? workerUrlEditor
-      return new Worker(url, { type: 'module' })
-    },
+    if (options?.fetch) {
+      // best-effort fetch to warm caches; do not throw on individual failures
+      await Promise.all(
+        unique.map((u) =>
+          fetch(u, { method: 'GET', cache: 'force-cache' }).catch(
+            () => undefined,
+          ),
+        ),
+      )
+    }
+    // eslint-disable-next-line no-restricted-globals
+    ;(self as any).MonacoEnvironment = {
+      getWorker(_: any, label: string) {
+        const url = workerUrlByLabel[label] ?? workerUrlEditor
+        return new Worker(url, { type: 'module' })
+      },
+    }
+  } catch {
+    // swallow errors - preloading is best-effort
   }
 }
+
+preloadMonacoWorkers()
 
 export type MonacoEditorInstance = monaco.editor.IStandaloneCodeEditor
 export type { ThemeInput }
@@ -109,6 +128,8 @@ async function registerMonacoThemes(
   languages: string[],
 ) {
   registerMonacoLanguages(languages)
+
+  // If nothing changed, skip heavy work
   if (
     themesRegistered &&
     arraysEqual(themes, currentThemes) &&
@@ -116,25 +137,46 @@ async function registerMonacoThemes(
   ) {
     return
   }
-  themesRegistered = true
-  currentThemes = themes
-  currentLanguages = languages
-  const highlighter = await createHighlighter({
-    themes,
-    langs: languages,
-  })
-  shikiToMonaco(highlighter, monaco)
+
+  // Create highlighter (heavy) and only mark as registered on success.
+  try {
+    const highlighter = await createHighlighter({
+      themes,
+      langs: languages,
+    })
+    shikiToMonaco(highlighter, monaco)
+
+    // Mark state after successful registration so failures don't block retries
+    themesRegistered = true
+    currentThemes = themes
+    currentLanguages = languages
+  } catch (e) {
+    // reset the global promise so callers can retry later
+    themeRegisterPromise = null
+    throw e
+  }
 }
 
 function registerMonacoLanguages(languages: string[]) {
+  // If nothing changed, skip
   if (languagesRegistered && arraysEqual(languages, currentLanguages)) {
     return
   }
+
+  // Only register languages that Monaco doesn't already know about.
+  const existing = new Set(monaco.languages.getLanguages().map((l) => l.id))
+  for (const lang of languages) {
+    if (!existing.has(lang)) {
+      try {
+        monaco.languages.register({ id: lang })
+      } catch {
+        // ignore registration errors for unknown/unsupported ids
+      }
+    }
+  }
+
   languagesRegistered = true
   currentLanguages = languages
-  for (const lang of languages) {
-    monaco.languages.register({ id: lang })
-  }
 }
 
 export type MonacoTheme =
@@ -651,6 +693,14 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
 
     updateHeight()
     editorView.onDidChangeModelContent(updateHeight)
+    // keep lastKnownCode in sync when user or program changes content
+    editorView.onDidChangeModelContent(() => {
+      try {
+        lastKnownCode = editorView!.getValue()
+      } catch {
+        // ignore
+      }
+    })
 
     // Scroll to the bottom if initialized with a scrollbar
     const model = editorView.getModel()
@@ -733,6 +783,13 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
           forceMoveMarkers: true,
         },
       ])
+    }
+
+    // sync lastKnownCode after edits
+    try {
+      lastKnownCode = model.getValue()
+    } catch {
+      // ignore
     }
 
     // 如果内容超过最大高度则滚动到底部
