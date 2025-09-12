@@ -592,6 +592,8 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
   // 清除之前在 onBeforeCreate 中注册的资源
   if (monacoOptions.isCleanOnBeforeCreate ?? true)
     disposals.forEach((d) => d.dispose())
+  // 释放已处理的引用，避免数组无限增长
+  if (monacoOptions.isCleanOnBeforeCreate ?? true) disposals.length = 0
   let editorView: monaco.editor.IStandaloneCodeEditor | null = null
   const themes = monacoOptions.themes ?? defaultThemes
   if (!Array.isArray(themes) || themes.length < 2) {
@@ -623,6 +625,11 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
   const maxHeightCSS = getMaxHeightCSS()
   let lastContainer: HTMLElement | null = null
   let lastKnownCode: string | null = null
+  // 合并同一帧内的多次 updateCode 调用，降低布局与 DOM 抖动
+  let pendingUpdate: { code: string; lang: string } | null = null
+  let rafId: number | null = null
+  // 记录上一次应用的主题，避免重复 setTheme 引发不必要的工作
+  let lastAppliedTheme: string | null = null
   const currentTheme = computed<string>(() =>
     isDark.value
       ? typeof themes[0] === 'string'
@@ -692,7 +699,9 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     }
 
     updateHeight()
-    editorView.onDidChangeModelContent(updateHeight)
+    editorView.onDidContentSizeChange?.(() => updateHeight())
+    // 回退：如果某些情形下未触发 content-size 事件，监听内容变化
+    editorView.onDidChangeModelContent(() => updateHeight())
     // keep lastKnownCode in sync when user or program changes content
     editorView.onDidChangeModelContent(() => {
       try {
@@ -713,7 +722,10 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     themeWatcher = watch(
       () => isDark.value,
       () => {
-        monaco.editor.setTheme(currentTheme.value)
+        if (currentTheme.value !== lastAppliedTheme) {
+          monaco.editor.setTheme(currentTheme.value)
+          lastAppliedTheme = currentTheme.value
+        }
       },
       {
         flush: 'post',
@@ -728,6 +740,11 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
 
   // Ensure cleanup stops the watcher
   function cleanupEditor() {
+    if (rafId != null && typeof cancelAnimationFrame !== 'undefined') {
+      cancelAnimationFrame(rafId)
+      rafId = null
+    }
+    pendingUpdate = null
     if (editorView) {
       editorView.dispose()
       editorView = null
@@ -800,16 +817,61 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     }
   }
 
-  function updateCode(newCode: string, codeLanguage: string) {
+  // 计算前后缀公共部分，并构造最小替换编辑（中间段替换）
+  function applyMinimalEdit(prev: string, next: string) {
     if (!editorView) return
-
     const model = editorView.getModel()
     if (!model) return
 
+    // 完全相同无需处理
+    if (prev === next) return
+
+    // 前缀
+    let start = 0
+    const minLen = Math.min(prev.length, next.length)
+    while (start < minLen && prev.charCodeAt(start) === next.charCodeAt(start))
+      start++
+
+    // 后缀（避免与前缀重叠）
+    let endPrev = prev.length - 1
+    let endNext = next.length - 1
+    while (
+      endPrev >= start &&
+      endNext >= start &&
+      prev.charCodeAt(endPrev) === next.charCodeAt(endNext)
+    ) {
+      endPrev--
+      endNext--
+    }
+
+    const replaceText = next.slice(start, endNext + 1)
+    const rangeStart = model.getPositionAt(start)
+    const rangeEnd = model.getPositionAt(endPrev + 1)
+    const range = new monaco.Range(
+      rangeStart.lineNumber,
+      rangeStart.column,
+      rangeEnd.lineNumber,
+      rangeEnd.column,
+    )
+
+    const isReadOnly = editorView.getOption(monaco.editor.EditorOption.readOnly)
+    const edit = [{ range, text: replaceText, forceMoveMarkers: true }]
+    if (isReadOnly) model.applyEdits(edit)
+    else editorView.executeEdits('minimal-replace', edit)
+  }
+
+  function flushPendingUpdate() {
+    rafId = null
+    if (!pendingUpdate) return
+    if (!editorView) return
+    const model = editorView.getModel()
+    if (!model) return
+    const { code: newCode, lang: codeLanguage } = pendingUpdate
+    pendingUpdate = null
     const processedCodeLanguage = processedLanguage(codeLanguage)
     const languageId = model.getLanguageId()
 
-    // 如果语言不同，直接切换语言并全量替换（不尝试增量）
+    // 语言不同：切换语言并全量写入（避免增量带来的 tokenization 错配）
     if (languageId !== processedCodeLanguage) {
       if (processedCodeLanguage)
         monaco.editor.setModelLanguage(model, processedCodeLanguage)
@@ -828,25 +890,20 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       return
     }
 
-    // 使用上一次记录的内容优先，否则回退到 editor 当前值
     const prevCode = lastKnownCode ?? editorView.getValue()
-
-    // 如果完全相同则无需更新
     if (prevCode === newCode) return
 
-    // 如果 newCode 以 prevCode 为前缀，则只追加后缀（优化）
+    // 仅追加（流式场景最常见）
     if (newCode.startsWith(prevCode) && prevCode.length < newCode.length) {
       const suffix = newCode.slice(prevCode.length)
-      if (suffix.length > 0) {
-        appendCode(suffix, codeLanguage)
-        lastKnownCode = newCode
-      }
+      if (suffix) appendCode(suffix, codeLanguage)
+      lastKnownCode = newCode
       return
     }
 
-    // 其他情况回退为全量替换
+    // 中间最小替换，减少 DOM 变动范围
     const prevLineCount = model.getLineCount()
-    model.setValue(newCode)
+    applyMinimalEdit(prevCode, newCode)
     lastKnownCode = newCode
     const newLineCount = model.getLineCount()
     const container = editorView.getContainerDomNode?.()
@@ -857,6 +914,13 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     ) {
       editorView.revealLine(newLineCount)
     }
+  }
+
+  function updateCode(newCode: string, codeLanguage: string) {
+    // 合并本帧内的多次调用
+    pendingUpdate = { code: newCode, lang: codeLanguage }
+    if (rafId != null) cancelAnimationFrame(rafId)
+    rafId = requestAnimationFrame(flushPendingUpdate)
   }
 
   return {
