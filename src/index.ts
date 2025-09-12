@@ -1,106 +1,18 @@
 import type { SpecialTheme, ThemeInput } from 'shiki'
 import type { WatchStopHandle } from 'vue'
-import { shikiToMonaco } from '@shikijs/monaco'
+import type { MonacoLanguage, MonacoOptions, MonacoTheme } from './type'
 
+import { shikiToMonaco } from '@shikijs/monaco'
 import * as monaco from 'monaco-editor'
 // @ts-expect-error bundle import for shiki
 import { createHighlighter } from 'shiki/bundle/full'
 import { computed, onUnmounted, watch } from 'vue'
 import { detectLanguage, processedLanguage } from './code.detect'
+import { defaultLanguages, defaultScrollbar, defaultThemes } from './constant'
 import { isDark } from './isDark'
-
-// Expose a function so consumers can proactively preload worker loaders
-// without relying on module evaluation timing.
-export async function preloadMonacoWorkers(options?: {
-  /**
-   * If true, also fetch each worker URL to warm the HTTP cache (best-effort).
-   */
-  fetch?: boolean
-}): Promise<void> {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return
-
-  // Recreate the same URLs as used by MonacoEnvironment
-  const workerUrlJson = new URL(
-    'monaco-editor/esm/vs/language/json/json.worker.js',
-    import.meta.url,
-  )
-  const workerUrlCss = new URL(
-    'monaco-editor/esm/vs/language/css/css.worker.js',
-    import.meta.url,
-  )
-  const workerUrlHtml = new URL(
-    'monaco-editor/esm/vs/language/html/html.worker.js',
-    import.meta.url,
-  )
-  const workerUrlTs = new URL(
-    'monaco-editor/esm/vs/language/typescript/ts.worker.js',
-    import.meta.url,
-  )
-  const workerUrlEditor = new URL(
-    'monaco-editor/esm/vs/editor/editor.worker.js',
-    import.meta.url,
-  )
-
-  const unique = Array.from(
-    new Set([
-      String(workerUrlJson),
-      String(workerUrlCss),
-      String(workerUrlHtml),
-      String(workerUrlTs),
-      String(workerUrlEditor),
-    ]),
-  )
-
-  const workerUrlByLabel: Record<string, URL> = {
-    json: workerUrlJson,
-    css: workerUrlCss,
-    scss: workerUrlCss,
-    less: workerUrlCss,
-    html: workerUrlHtml,
-    handlebars: workerUrlHtml,
-    razor: workerUrlHtml,
-    typescript: workerUrlTs,
-    javascript: workerUrlTs,
-  }
-
-  try {
-    for (const href of unique) {
-      if (
-        !document.querySelector(`link[rel="modulepreload"][href="${href}"]`)
-      ) {
-        const link = document.createElement('link')
-        link.rel = 'modulepreload'
-        link.href = href
-        document.head.appendChild(link)
-      }
-    }
-
-    if (options?.fetch) {
-      // best-effort fetch to warm caches; do not throw on individual failures
-      await Promise.all(
-        unique.map((u) =>
-          fetch(u, { method: 'GET', cache: 'force-cache' }).catch(
-            () => undefined,
-          ),
-        ),
-      )
-    }
-    // eslint-disable-next-line no-restricted-globals
-    ;(self as any).MonacoEnvironment = {
-      getWorker(_: any, label: string) {
-        const url = workerUrlByLabel[label] ?? workerUrlEditor
-        return new Worker(url, { type: 'module' })
-      },
-    }
-  } catch {
-    // swallow errors - preloading is best-effort
-  }
-}
+import { preloadMonacoWorkers } from './preloadMonacoWorkers'
 
 preloadMonacoWorkers()
-
-export type MonacoEditorInstance = monaco.editor.IStandaloneCodeEditor
-export type { ThemeInput }
 
 let themesRegistered = false
 let languagesRegistered = false
@@ -179,307 +91,6 @@ function registerMonacoLanguages(languages: string[]) {
   currentLanguages = languages
 }
 
-export type MonacoTheme =
-  | 'andromeeda'
-  | 'aurora-x'
-  | 'ayu-dark'
-  | 'catppuccin-frappe'
-  | 'catppuccin-latte'
-  | 'catppuccin-macchiato'
-  | 'catppuccin-mocha'
-  | 'dark-plus'
-  | 'dracula'
-  | 'dracula-soft'
-  | 'everforest-dark'
-  | 'everforest-light'
-  | 'github-dark'
-  | 'github-dark-default'
-  | 'github-dark-dimmed'
-  | 'github-dark-high-contrast'
-  | 'github-light'
-  | 'github-light-default'
-  | 'github-light-high-contrast'
-  | 'gruvbox-dark-hard'
-  | 'gruvbox-dark-medium'
-  | 'gruvbox-dark-soft'
-  | 'gruvbox-light-hard'
-  | 'gruvbox-light-medium'
-  | 'gruvbox-light-soft'
-  | 'houston'
-  | 'kanagawa-dragon'
-  | 'kanagawa-lotus'
-  | 'kanagawa-wave'
-  | 'laserwave'
-  | 'light-plus'
-  | 'material-theme'
-  | 'material-theme-darker'
-  | 'material-theme-lighter'
-  | 'material-theme-ocean'
-  | 'material-theme-palenight'
-  | 'min-dark'
-  | 'min-light'
-  | 'monokai'
-  | 'night-owl'
-  | 'nord'
-  | 'one-dark-pro'
-  | 'one-light'
-  | 'plastic'
-  | 'poimandres'
-  | 'red'
-  | 'rose-pine'
-  | 'rose-pine-dawn'
-  | 'rose-pine-moon'
-  | 'slack-dark'
-  | 'slack-ochin'
-  | 'snazzy-light'
-  | 'solarized-dark'
-  | 'solarized-light'
-  | 'synthwave-84'
-  | 'tokyo-night'
-  | 'vesper'
-  | 'vitesse-black'
-  | 'vitesse-dark'
-  | 'vitesse-light'
-  | ThemeInput
-  | string
-  | SpecialTheme
-export type MonacoLanguage =
-  | 'abap'
-  | 'actionscript-3'
-  | 'ada'
-  | 'angular-html'
-  | 'angular-ts'
-  | 'apache'
-  | 'apex'
-  | 'apl'
-  | 'applescript'
-  | 'ara'
-  | 'asciidoc'
-  | 'asm'
-  | 'astro'
-  | 'awk'
-  | 'ballerina'
-  | 'bat'
-  | 'beancount'
-  | 'berry'
-  | 'bibtex'
-  | 'bicep'
-  | 'blade'
-  | 'bsl'
-  | 'c'
-  | 'cadence'
-  | 'cairo'
-  | 'clarity'
-  | 'clojure'
-  | 'cmake'
-  | 'cobol'
-  | 'codeowners'
-  | 'codeql'
-  | 'coffee'
-  | 'common-lisp'
-  | 'coq'
-  | 'cpp'
-  | 'crystal'
-  | 'csharp'
-  | 'css'
-  | 'csv'
-  | 'cue'
-  | 'cypher'
-  | 'd'
-  | 'dart'
-  | 'dax'
-  | 'desktop'
-  | 'diff'
-  | 'docker'
-  | 'dotenv'
-  | 'dream-maker'
-  | 'edge'
-  | 'elixir'
-  | 'elm'
-  | 'emacs-lisp'
-  | 'erb'
-  | 'erlang'
-  | 'fennel'
-  | 'fish'
-  | 'fluent'
-  | 'fortran-fixed-form'
-  | 'fortran-free-form'
-  | 'fsharp'
-  | 'gdresource'
-  | 'gdscript'
-  | 'gdshader'
-  | 'genie'
-  | 'gherkin'
-  | 'git-commit'
-  | 'git-rebase'
-  | 'gleam'
-  | 'glimmer-js'
-  | 'glimmer-ts'
-  | 'glsl'
-  | 'gnuplot'
-  | 'go'
-  | 'graphql'
-  | 'groovy'
-  | 'hack'
-  | 'haml'
-  | 'handlebars'
-  | 'haskell'
-  | 'haxe'
-  | 'hcl'
-  | 'hjson'
-  | 'hlsl'
-  | 'html'
-  | 'html-derivative'
-  | 'http'
-  | 'hxml'
-  | 'hy'
-  | 'imba'
-  | 'ini'
-  | 'java'
-  | 'javascript'
-  | 'jinja'
-  | 'jison'
-  | 'json'
-  | 'json5'
-  | 'jsonc'
-  | 'jsonl'
-  | 'jsonnet'
-  | 'jssm'
-  | 'jsx'
-  | 'julia'
-  | 'kotlin'
-  | 'kusto'
-  | 'latex'
-  | 'lean'
-  | 'less'
-  | 'liquid'
-  | 'llvm'
-  | 'log'
-  | 'logo'
-  | 'lua'
-  | 'luau'
-  | 'make'
-  | 'markdown'
-  | 'marko'
-  | 'matlab'
-  | 'mdc'
-  | 'mdx'
-  | 'mermaid'
-  | 'mipsasm'
-  | 'mojo'
-  | 'move'
-  | 'narrat'
-  | 'nextflow'
-  | 'nginx'
-  | 'nim'
-  | 'nix'
-  | 'nushell'
-  | 'objective-c'
-  | 'objective-cpp'
-  | 'ocaml'
-  | 'pascal'
-  | 'perl'
-  | 'php'
-  | 'plsql'
-  | 'po'
-  | 'polar'
-  | 'postcss'
-  | 'powerquery'
-  | 'powershell'
-  | 'prisma'
-  | 'prolog'
-  | 'proto'
-  | 'pug'
-  | 'puppet'
-  | 'purescript'
-  | 'python'
-  | 'qml'
-  | 'qmldir'
-  | 'qss'
-  | 'r'
-  | 'racket'
-  | 'raku'
-  | 'razor'
-  | 'reg'
-  | 'regexp'
-  | 'rel'
-  | 'riscv'
-  | 'rst'
-  | 'ruby'
-  | 'rust'
-  | 'sas'
-  | 'sass'
-  | 'scala'
-  | 'scheme'
-  | 'scss'
-  | 'sdbl'
-  | 'shaderlab'
-  | 'shellscript'
-  | 'shellsession'
-  | 'smalltalk'
-  | 'solidity'
-  | 'soy'
-  | 'sparql'
-  | 'splunk'
-  | 'sql'
-  | 'ssh-config'
-  | 'stata'
-  | 'stylus'
-  | 'svelte'
-  | 'swift'
-  | 'system-verilog'
-  | 'systemd'
-  | 'talonscript'
-  | 'tasl'
-  | 'tcl'
-  | 'templ'
-  | 'terraform'
-  | 'tex'
-  | 'toml'
-  | 'ts-tags'
-  | 'tsv'
-  | 'tsx'
-  | 'turtle'
-  | 'twig'
-  | 'typescript'
-  | 'typespec'
-  | 'typst'
-  | 'v'
-  | 'vala'
-  | 'vb'
-  | 'verilog'
-  | 'vhdl'
-  | 'viml'
-  | 'vue'
-  | 'vue-html'
-  | 'vyper'
-  | 'wasm'
-  | 'wenyan'
-  | 'wgsl'
-  | 'wikitext'
-  | 'wit'
-  | 'wolfram'
-  | 'xml'
-  | 'xsl'
-  | 'yaml'
-  | 'zenscript'
-  | 'zig'
-  | string
-
-export interface MonacoOptions
-  extends monaco.editor.IStandaloneEditorConstructionOptions {
-  MAX_HEIGHT?: number | string
-  readOnly?: boolean
-  themes?: MonacoTheme[]
-  languages?: MonacoLanguage[]
-  theme?: string
-  isCleanOnBeforeCreate?: boolean
-  // 添加在编辑器创建之前的钩子
-  onBeforeCreate?: (
-    monaco: typeof import('monaco-editor'),
-  ) => monaco.IDisposable[]
-}
-
 /**
  * useMonaco 组合式函数
  *
@@ -537,58 +148,7 @@ export interface MonacoOptions
  * setTheme('vitesse-light')
  * ```
  */
-const defaultLanguages = [
-  'jsx',
-  'tsx',
-  'vue',
-  'csharp',
-  'python',
-  'java',
-  'c',
-  'cpp',
-  'rust',
-  'go',
-  'powershell',
-  'sql',
-  'json',
-  'html',
-  'javascript',
-  'typescript',
-  'css',
-  'markdown',
-  'xml',
-  'yaml',
-  'toml',
-  'dockerfile',
-  'kotlin',
-  'objective-c',
-  'objective-cpp',
-  'php',
-  'ruby',
-  'scala',
-  'svelte',
-  'swift',
-  'erlang',
-  'angular-html',
-  'angular-ts',
-  'dart',
-  'lua',
-  'mermaid',
-  'cmake',
-  'nginx',
-]
-const defaultThemes: MonacoTheme[] = ['vitesse-dark', 'vitesse-light']
-const defaultScrollbar = {
-  verticalScrollbarSize: 8,
-  horizontalScrollbarSize: 8,
-  handleMouseWheel: true,
-  /**
-   * 是否始终消费鼠标滚轮事件，默认为 false
-   * 如果为 true，则鼠标滚轮事件不会传递给其他元素
-   */
-  alwaysConsumeMouseWheel: false,
-}
-export function useMonaco(monacoOptions: MonacoOptions = {}) {
+function useMonaco(monacoOptions: MonacoOptions = {}) {
   // 清除之前在 onBeforeCreate 中注册的资源
   if (monacoOptions.isCleanOnBeforeCreate ?? true)
     disposals.forEach((d) => d.dispose())
@@ -603,6 +163,10 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
   }
   const languages = monacoOptions.languages ?? defaultLanguages
   const MAX_HEIGHT = monacoOptions.MAX_HEIGHT ?? 500
+  const autoScrollOnUpdate = monacoOptions.autoScrollOnUpdate ?? true
+  const autoScrollInitial = monacoOptions.autoScrollInitial ?? true
+  const autoScrollThresholdPx = monacoOptions.autoScrollThresholdPx ?? 32
+  const autoScrollThresholdLines = monacoOptions.autoScrollThresholdLines ?? 2
 
   // 处理 MAX_HEIGHT，转换为数值和CSS字符串
   const getMaxHeightValue = (): number => {
@@ -628,6 +192,12 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
   // 合并同一帧内的多次 updateCode 调用，降低布局与 DOM 抖动
   let pendingUpdate: { code: string; lang: string } | null = null
   let rafId: number | null = null
+  // 自动滚动控制：
+  // - 当用户向上滚动离开底部时，暂停 revealLine 的自动滚动
+  // - 当用户再次滚动回接近底部（阈值：两行高或 32px）时，恢复自动滚动
+  let shouldAutoScroll = true
+  let scrollWatcher: monaco.IDisposable | null = null
+  let lastScrollTop = 0
   // 记录上一次应用的主题，避免重复 setTheme 引发不必要的工作
   let lastAppliedTheme: string | null = null
   const currentTheme = computed<string>(() =>
@@ -640,6 +210,48 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       : (themes[1] as any).name,
   )
   let themeWatcher: WatchStopHandle | null = null
+
+  // 检查是否出现垂直滚动条
+  function hasVerticalScrollbar(): boolean {
+    try {
+      if (!editorView) return false
+      const li = editorView.getLayoutInfo?.()
+      const sh = editorView.getScrollHeight?.()
+      return !!(li && typeof sh === 'number' && sh > li.height + 1)
+    } catch {
+      return false
+    }
+  }
+
+  // 判断是否接近底部（阈值：两行高度或 32px）
+  function userIsNearBottom(): boolean {
+    try {
+      if (!editorView) return true
+      const li = editorView.getLayoutInfo?.()
+      if (!li) return true
+      const lineHeight = editorView.getOption(
+        monaco.editor.EditorOption.lineHeight,
+      )
+      const lineThreshold = (autoScrollThresholdLines ?? 0) * lineHeight
+      const threshold = Math.max(lineThreshold || 0, autoScrollThresholdPx || 0)
+      const st = editorView.getScrollTop?.() ?? 0
+      const sh = editorView.getScrollHeight?.() ?? li.height
+      const distance = sh - (st + li.height)
+      return distance <= threshold
+    } catch {
+      return true
+    }
+  }
+
+  // 在满足条件时滚动到底部，否则尊重用户滚动状态
+  function maybeScrollToBottom(targetLine?: number) {
+    if (!editorView) return
+    if (autoScrollOnUpdate && shouldAutoScroll && hasVerticalScrollbar()) {
+      const model = editorView.getModel()
+      const line = targetLine ?? model?.getLineCount() ?? 1
+      editorView.revealLine(line)
+    }
+  }
 
   // 在创建编辑器之前执行用户自定义逻辑
   if (monacoOptions.onBeforeCreate) {
@@ -711,12 +323,37 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       }
     })
 
+    // 初始化并监听滚动：根据配置默认启用/禁用自动滚动；
+    // 用户向上滚动则立即暂停，向下滚动并接近底部时恢复
+    shouldAutoScroll = !!autoScrollInitial
+    lastScrollTop = editorView.getScrollTop?.() ?? 0
+    if (scrollWatcher) {
+      try {
+        scrollWatcher.dispose()
+      } catch {}
+      scrollWatcher = null
+    }
+    scrollWatcher =
+      editorView.onDidScrollChange?.((e) => {
+        const currentTop =
+          e && typeof e.scrollTop === 'number'
+            ? e.scrollTop
+            : editorView!.getScrollTop?.() ?? 0
+        const delta = currentTop - lastScrollTop
+        lastScrollTop = currentTop
+        if (delta < 0) {
+          // 用户向上滚动：立即暂停自动滚动
+          shouldAutoScroll = false
+          return
+        }
+        // 向下或未变化：仅当接近底部时恢复
+        shouldAutoScroll = userIsNearBottom()
+      }) ?? null
+
     // Scroll to the bottom if initialized with a scrollbar
     const model = editorView.getModel()
     const lineCount = model?.getLineCount() ?? 1
-    if (container.scrollHeight >= maxHeightValue) {
-      editorView.revealLine(lineCount)
-    }
+    maybeScrollToBottom(lineCount)
 
     // Watch for isDark changes and update the theme
     themeWatcher = watch(
@@ -757,6 +394,12 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     if (themeWatcher) {
       themeWatcher()
       themeWatcher = null
+    }
+    if (scrollWatcher) {
+      try {
+        scrollWatcher.dispose()
+      } catch {}
+      scrollWatcher = null
     }
   }
 
@@ -809,12 +452,9 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       // ignore
     }
 
-    // 如果内容超过最大高度则滚动到底部
+    // 如果出现滚动条且允许自动滚动则滚动到底部
     const newLine = model.getLineCount()
-    const container = editorView.getContainerDomNode?.()
-    if (container && container.scrollHeight >= maxHeightValue) {
-      editorView.revealLine(newLine)
-    }
+    maybeScrollToBottom(newLine)
   }
 
   // 计算前后缀公共部分，并构造最小替换编辑（中间段替换）
@@ -879,13 +519,8 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
       model.setValue(newCode)
       lastKnownCode = newCode
       const newLineCount = model.getLineCount()
-      const container = editorView.getContainerDomNode?.()
-      if (
-        newLineCount !== prevLineCount &&
-        container &&
-        container.scrollHeight >= maxHeightValue
-      ) {
-        editorView.revealLine(newLineCount)
+      if (newLineCount !== prevLineCount) {
+        maybeScrollToBottom(newLineCount)
       }
       return
     }
@@ -906,13 +541,8 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
     applyMinimalEdit(prevCode, newCode)
     lastKnownCode = newCode
     const newLineCount = model.getLineCount()
-    const container = editorView.getContainerDomNode?.()
-    if (
-      newLineCount !== prevLineCount &&
-      container &&
-      container.scrollHeight >= maxHeightValue
-    ) {
-      editorView.revealLine(newLineCount)
+    if (newLineCount !== prevLineCount) {
+      maybeScrollToBottom(newLineCount)
     }
   }
 
@@ -969,4 +599,6 @@ export function useMonaco(monacoOptions: MonacoOptions = {}) {
   }
 }
 
-export { detectLanguage }
+export { detectLanguage, preloadMonacoWorkers, useMonaco }
+
+export * from './type'
