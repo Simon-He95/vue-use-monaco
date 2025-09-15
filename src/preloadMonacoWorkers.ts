@@ -6,7 +6,8 @@ export async function preloadMonacoWorkers(options?: {
    */
   fetch?: boolean
 }): Promise<void> {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return
+  if (typeof window === 'undefined' || typeof document === 'undefined')
+    return
 
   // Recreate the same URLs as used by MonacoEnvironment
   const workerUrlJson = new URL(
@@ -67,7 +68,7 @@ export async function preloadMonacoWorkers(options?: {
     if (options?.fetch) {
       // best-effort fetch to warm caches; do not throw on individual failures
       await Promise.all(
-        unique.map((u) =>
+        unique.map(u =>
           fetch(u, { method: 'GET', cache: 'force-cache' }).catch(
             () => undefined,
           ),
@@ -81,7 +82,8 @@ export async function preloadMonacoWorkers(options?: {
         return new Worker(url, { type: 'module' })
       },
     }
-  } catch {
+  }
+  catch {
     // swallow errors - preloading is best-effort
   }
 }

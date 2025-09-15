@@ -9,8 +9,8 @@ const msgPath = process.argv[2]
 const msg = readFileSync(msgPath, 'utf-8').trim()
 
 const releaseRE = /^v\d/
-const commitRE =
-  /^(?:revert: )?(?:feat|fix|docs|dx|refactor|perf|test|workflow|build|ci|chore|types|wip|release|deps)(?:\(.+\))?!?: .{1,50}/
+const commitRE
+  = /^(?:revert: )?(?:feat|fix|docs|dx|refactor|perf|test|workflow|build|ci|chore|types|wip|release|deps)(?:\(.+\))?!?: .{1,50}/
 
 if (!releaseRE.test(msg) && !commitRE.test(msg)) {
   console.log()
@@ -19,12 +19,12 @@ if (!releaseRE.test(msg) && !commitRE.test(msg)) {
       'invalid commit message format.',
     )}\n\n${colors.red(
       '  Proper commit message format is required for automated changelog generation. Examples:\n\n',
-    )}    ${colors.green("feat: add 'comments' option")}\n` +
-      `    ${colors.green(
-        'fix: handle events on blur (close #28)',
-      )}\n\n${colors.red(
-        '  See .github/commit-convention.md for more details.\n',
-      )}`,
+    )}    ${colors.green('feat: add \'comments\' option')}\n`
+    + `    ${colors.green(
+      'fix: handle events on blur (close #28)',
+    )}\n\n${colors.red(
+      '  See .github/commit-convention.md for more details.\n',
+    )}`,
   )
   process.exit(1)
 }

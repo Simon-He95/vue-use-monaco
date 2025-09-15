@@ -6,33 +6,33 @@
 /**
  * Supported language identifiers
  */
-export type CodeLanguage =
-  | 'bash'
-  | 'html'
-  | 'http'
-  | 'js'
-  | 'ts'
-  | 'py'
-  | 'sql'
-  | 'pl'
-  | 'lua'
-  | 'make'
-  | 'uri'
-  | 'css'
-  | 'diff'
-  | 'md'
-  | 'docker'
-  | 'xml'
-  | 'c'
-  | 'rs'
-  | 'go'
-  | 'java'
-  | 'asm'
-  | 'json'
-  | 'yaml'
-  | 'toml'
-  | 'mermaid'
-  | 'plain'
+export type CodeLanguage
+  = | 'bash'
+    | 'html'
+    | 'http'
+    | 'js'
+    | 'ts'
+    | 'py'
+    | 'sql'
+    | 'pl'
+    | 'lua'
+    | 'make'
+    | 'uri'
+    | 'css'
+    | 'diff'
+    | 'md'
+    | 'docker'
+    | 'xml'
+    | 'c'
+    | 'rs'
+    | 'go'
+    | 'java'
+    | 'asm'
+    | 'json'
+    | 'yaml'
+    | 'toml'
+    | 'mermaid'
+    | 'plain'
 
 /**
  * Language detection feature with pattern and score
@@ -137,8 +137,10 @@ export function detectLanguage(
 
 export function processedLanguage(language: string) {
   // eslint-disable-next-line regexp/no-dupe-disjunctions
-  if (/^(?:shellscript|bash|sh|shell|zsh)/i.test(language)) return 'shell'
-  if (/^(?:powershell|ps1?)/i.test(language)) return 'powershell'
+  if (/^(?:shellscript|bash|sh|shell|zsh)/i.test(language))
+    return 'shell'
+  if (/^(?:powershell|ps1?)/i.test(language))
+    return 'powershell'
   return language.split(':')[0]
 }
 
