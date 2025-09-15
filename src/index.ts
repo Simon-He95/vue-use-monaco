@@ -271,8 +271,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
         return false
       if (_hasScrollBar)
         return true
-
-      return _hasScrollBar = (editorView.getScrollHeight!() > computedHeight(editorView))
+      return _hasScrollBar = (editorView.getScrollHeight!() > computedHeight(editorView) + padding / 2)
     }
     catch {
       return false
@@ -311,7 +310,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
         return true
       const me = diffEditorView.getModifiedEditor()
 
-      return _hasScrollBar = me.getScrollHeight() > computedHeight(me)
+      return _hasScrollBar = me.getScrollHeight() > computedHeight(me) + padding / 2
     }
     catch {
       return false
@@ -414,14 +413,39 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     // 记录初始内容，便于后续增量判断
     lastKnownCode = editorView.getValue()
 
+    // 使用 RAF 合并 + 抑制标记，避免设置高度导致的二次 onDidContentSizeChange
+    let heightRafId: number | null = null
+    let lastAppliedHeightPx = -1
+    let suppressContentSizeEvent = false
+    const applyHeight = () => {
+      if (!editorView)
+        return
+      const next = computedHeight(editorView)
+      if (next === lastAppliedHeightPx)
+        return
+      suppressContentSizeEvent = true
+      container.style.height = `${next}px`
+      lastAppliedHeightPx = next
+      queueMicrotask(() => {
+        suppressContentSizeEvent = false
+      })
+    }
     function updateHeight() {
-      container.style.height = `${computedHeight(editorView!)}px`
+      if (heightRafId != null)
+        return
+      heightRafId = requestAnimationFrame(() => {
+        heightRafId = null
+        applyHeight()
+      })
     }
 
     updateHeight()
-    editorView.onDidContentSizeChange?.(() => updateHeight())
-    // 回退：如果某些情形下未触发 content-size 事件，监听内容变化
-    editorView.onDidChangeModelContent(() => updateHeight())
+    editorView.onDidContentSizeChange?.(() => {
+      if (suppressContentSizeEvent)
+        return
+      updateHeight()
+    })
+    // 不在内容变更事件里直接改高度，避免双重触发；仅同步 lastKnownCode
     // keep lastKnownCode in sync when user or program changes content
     editorView.onDidChangeModelContent(() => {
       try {
@@ -588,19 +612,41 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     maybeScrollDiffToBottom(modifiedModel.getLineCount())
 
     // 高度自适应：取原/新两侧的最大行数
-    function updateHeight() {
+    // Diff 高度：RAF 合并 + 抑制 content-size 重入
+    let diffHeightRafId: number | null = null
+    let lastAppliedDiffHeightPx = -1
+    let suppressDiffContentSizeEvent = false
+    const computeDiffHeight = () => {
       const modifiedEditor = diffEditorView!.getModifiedEditor()
       const originalEditor = diffEditorView!.getOriginalEditor()
       const lineHeight = modifiedEditor.getOption(
         monaco.editor.EditorOption.lineHeight,
       )
-
       const oCount = originalEditor.getModel()?.getLineCount() ?? 1
       const mCount = modifiedEditor.getModel()?.getLineCount() ?? 1
       const lineCount = Math.max(oCount, mCount)
-
-      const height = Math.min(lineCount * lineHeight + padding, maxHeightValue)
-      container.style.height = `${height}px`
+      return Math.min(lineCount * lineHeight + padding, maxHeightValue)
+    }
+    const applyDiffHeight = () => {
+      if (!diffEditorView)
+        return
+      const next = computeDiffHeight()
+      if (next === lastAppliedDiffHeightPx)
+        return
+      suppressDiffContentSizeEvent = true
+      container.style.height = `${next}px`
+      lastAppliedDiffHeightPx = next
+      queueMicrotask(() => {
+        suppressDiffContentSizeEvent = false
+      })
+    }
+    function updateHeight() {
+      if (diffHeightRafId != null)
+        return
+      diffHeightRafId = requestAnimationFrame(() => {
+        diffHeightRafId = null
+        applyDiffHeight()
+      })
     }
 
     // 初始化高度
@@ -609,10 +655,16 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     // 监听内容与尺寸变化
     const oEditor = diffEditorView.getOriginalEditor()
     const mEditor = diffEditorView.getModifiedEditor()
-    oEditor.onDidContentSizeChange?.(() => updateHeight())
-    mEditor.onDidContentSizeChange?.(() => updateHeight())
-    oEditor.onDidChangeModelContent?.(() => updateHeight())
-    mEditor.onDidChangeModelContent?.(() => updateHeight())
+    oEditor.onDidContentSizeChange?.(() => {
+      if (suppressDiffContentSizeEvent)
+        return
+      updateHeight()
+    })
+    mEditor.onDidContentSizeChange?.(() => {
+      if (suppressDiffContentSizeEvent)
+        return
+      updateHeight()
+    })
 
     // 主题监听
     themeWatcher = watch(
