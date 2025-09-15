@@ -8,7 +8,7 @@ import * as monaco from 'monaco-editor'
 import { createHighlighter } from 'shiki/bundle/full'
 import { computed, onUnmounted, watch } from 'vue'
 import { detectLanguage, processedLanguage } from './code.detect'
-import { defaultLanguages, defaultScrollbar, defaultThemes } from './constant'
+import { defaultLanguages, defaultScrollbar, defaultThemes, padding } from './constant'
 import { isDark } from './isDark'
 import { computeMinimalEdit } from './minimalEdit'
 import { preloadMonacoWorkers } from './preloadMonacoWorkers'
@@ -201,6 +201,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     | { original: string, modified: string, lang?: string }
     | null = null
   let rafDiffId: number | null = null
+  let _hasScrollBar = false
 
   const themes = monacoOptions.themes ?? defaultThemes
   if (!Array.isArray(themes) || themes.length < 2) {
@@ -268,9 +269,10 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     try {
       if (!editorView)
         return false
-      const li = editorView.getLayoutInfo?.()
-      const sh = editorView.getScrollHeight?.()
-      return !!(li && typeof sh === 'number' && sh > li.height + 1)
+      if (_hasScrollBar)
+        return true
+
+      return _hasScrollBar = (editorView.getScrollHeight!() > computedHeight(editorView))
     }
     catch {
       return false
@@ -305,10 +307,11 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     try {
       if (!diffEditorView)
         return false
+      if (_hasScrollBar)
+        return true
       const me = diffEditorView.getModifiedEditor()
-      const li = me.getLayoutInfo?.()
-      const sh = me.getScrollHeight?.()
-      return !!(li && typeof sh === 'number' && sh > li.height + 1)
+
+      return _hasScrollBar = me.getScrollHeight() > computedHeight(me)
     }
     catch {
       return false
@@ -411,14 +414,8 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     // 记录初始内容，便于后续增量判断
     lastKnownCode = editorView.getValue()
 
-    const padding = 16
     function updateHeight() {
-      const lineCount = editorView!.getModel()?.getLineCount() ?? 1
-      const lineHeight = editorView!.getOption(
-        monaco.editor.EditorOption.lineHeight,
-      )
-      const height = Math.min(lineCount * lineHeight + padding, maxHeightValue)
-      container.style.height = `${height}px`
+      container.style.height = `${computedHeight(editorView!)}px`
     }
 
     updateHeight()
@@ -443,7 +440,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
       try {
         scrollWatcher.dispose()
       }
-      catch {}
+      catch { }
       scrollWatcher = null
     }
     scrollWatcher
@@ -485,7 +482,14 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
 
     return editorView
   }
-
+  function computedHeight(editorView: monaco.editor.IStandaloneCodeEditor) {
+    const lineCount = editorView!.getModel()?.getLineCount() ?? 1
+    const lineHeight = editorView!.getOption(
+      monaco.editor.EditorOption.lineHeight,
+    )
+    const height = Math.min(lineCount * lineHeight + padding, maxHeightValue)
+    return height
+  }
   // 新增：创建 Diff 编辑器
   async function createDiffEditor(
     container: HTMLElement,
@@ -558,7 +562,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
       try {
         diffScrollWatcher.dispose()
       }
-      catch {}
+      catch { }
       diffScrollWatcher = null
     }
     if (diffAutoScroll) {
@@ -584,7 +588,6 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     maybeScrollDiffToBottom(modifiedModel.getLineCount())
 
     // 高度自适应：取原/新两侧的最大行数
-    const padding = 16
     function updateHeight() {
       const modifiedEditor = diffEditorView!.getModifiedEditor()
       const originalEditor = diffEditorView!.getOriginalEditor()
@@ -659,14 +662,14 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
       try {
         scrollWatcher.dispose()
       }
-      catch {}
+      catch { }
       scrollWatcher = null
     }
     if (diffScrollWatcher) {
       try {
         diffScrollWatcher.dispose()
       }
-      catch {}
+      catch { }
       diffScrollWatcher = null
     }
 
@@ -675,21 +678,21 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
       try {
         diffEditorView.dispose()
       }
-      catch {}
+      catch { }
       diffEditorView = null
     }
     if (originalModel) {
       try {
         originalModel.dispose()
       }
-      catch {}
+      catch { }
       originalModel = null
     }
     if (modifiedModel) {
       try {
         modifiedModel.dispose()
       }
-      catch {}
+      catch { }
       modifiedModel = null
     }
   }
@@ -1062,7 +1065,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     try {
       lastKnownOriginalCode = originalModel.getValue()
     }
-    catch {}
+    catch { }
   }
 
   // 显式在 Diff 的 modified 末尾追加，并在需要时滚动
@@ -1078,7 +1081,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     try {
       lastKnownModifiedCode = modifiedModel.getValue()
     }
-    catch {}
+    catch { }
     maybeScrollDiffToBottom(modifiedModel.getLineCount())
   }
 

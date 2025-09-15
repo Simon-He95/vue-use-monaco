@@ -51,3 +51,4 @@ export const defaultScrollbar = {
    */
   alwaysConsumeMouseWheel: false,
 }
+export const padding = 16
