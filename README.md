@@ -270,6 +270,54 @@ function pushModifiedChunk(chunk: string) {
 </style>
 ```
 
+### 流式追加 + 语言切换（快速示例）
+
+```vue
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { useMonaco } from 'vue-use-monaco'
+
+const el = ref<HTMLElement>()
+const { createEditor, appendCode, setLanguage, cleanupEditor } = useMonaco({
+  themes: ['vitesse-dark', 'vitesse-light'],
+  languages: ['markdown', 'typescript'],
+  readOnly: false,
+  MAX_HEIGHT: 360,
+})
+
+let i = 0
+let timer: any
+
+onMounted(async () => {
+  if (!el.value)
+    return
+  await createEditor(el.value, '# Stream start\n', 'markdown')
+  // 模拟流式输出
+  timer = setInterval(() => {
+    i++
+    appendCode(`- line ${i}\\n`)
+    if (i === 5)
+      setLanguage('typescript') // 动态切换语言
+    if (i >= 10) {
+      clearInterval(timer)
+    }
+  }, 300)
+})
+</script>
+
+<template>
+  <div ref="el" />
+  <button @click="cleanupEditor">
+    Dispose
+  </button>
+  <p>前 5 行为 Markdown，随后切换为 TypeScript。</p>
+  <p>当内容接近底部时自动滚动（可通过 autoScroll* 选项进行控制）。</p>
+  <p>若是纯末尾追加，内部会走追加快路径，避免全量替换。</p>
+</template>
+```
+
+更多完整示例请见 examples/ 目录。
+
 #### 行为说明（增量与 RAF）
 
 - `updateDiff` 使用 `requestAnimationFrame` 合并同一帧内的多次调用，减少重排与布局开销。
