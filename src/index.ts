@@ -2,7 +2,7 @@ import type { WatchStopHandle } from 'vue'
 import type { MonacoLanguage, MonacoOptions, MonacoTheme } from './type'
 
 import * as monaco from 'monaco-editor'
-import { computed, onUnmounted, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { detectLanguage, processedLanguage } from './code.detect'
 import { defaultLanguages, defaultThemes, padding } from './constant'
 import { DiffEditorManager } from './core/DiffEditorManager'
@@ -337,7 +337,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     return diffEditorView
   }
 
-  onUnmounted(cleanupEditor)
+  // onUnmounted(cleanupEditor)
 
   // Ensure cleanup stops the watcher
   function cleanupEditor() {
@@ -698,6 +698,6 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
   }
 }
 
-export { detectLanguage, preloadMonacoWorkers, useMonaco }
+export { detectLanguage, isDark, preloadMonacoWorkers, useMonaco }
 
 export * from './type'
