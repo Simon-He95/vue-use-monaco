@@ -437,55 +437,6 @@ modified?.onDidChangeContent?.(() => { /* ... */ })
 - `markdown` / `dockerfile`
 - 以及 100+ 种语言...
 
-### 配置说明
-
-#### Vite 配置
-
-在使用 Monaco 编辑器时，建议使用 [vite-plugin-monaco-editor-esm](https://www.npmjs.com/package/vite-plugin-monaco-editor-esm) 插件处理 Web Workers。
-
-```javascript
-import path from 'node:path'
-import vue from '@vitejs/plugin-vue'
-// vite.config.js
-import { defineConfig } from 'vite'
-import monacoEditorPlugin from 'vite-plugin-monaco-editor-esm'
-
-export default defineConfig({
-  plugins: [
-    vue(),
-    monacoEditorPlugin({
-      languageWorkers: [
-        'editorWorkerService',
-        'typescript',
-        'css',
-        'html',
-        'json',
-      ],
-      customDistPath(root, buildOutDir, base) {
-        return path.resolve(buildOutDir, 'monacoeditorwork')
-      },
-    }),
-  ],
-})
-```
-
-#### Webpack 配置
-
-如果使用 Webpack，可以使用 `monaco-editor-webpack-plugin`：
-
-```javascript
-// webpack.config.js
-const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin')
-
-module.exports = {
-  plugins: [
-    new MonacoWebpackPlugin({
-      languages: ['javascript', 'typescript', 'css', 'html', 'json'],
-    }),
-  ],
-}
-```
-
 ### 最佳实践
 
 #### 1. 性能优化
@@ -506,8 +457,6 @@ import { onUnmounted } from 'vue'
 
 const { createEditor, cleanupEditor } = useMonaco()
 
-// 组件卸载时自动清理（useMonaco 内部已处理）
-// 但如果需要手动清理，可以调用：
 onUnmounted(() => {
   cleanupEditor()
 })
