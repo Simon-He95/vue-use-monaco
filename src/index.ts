@@ -11,7 +11,7 @@ import { isDark } from './isDark'
 import { computeMinimalEdit } from './minimalEdit'
 import { preloadMonacoWorkers } from './preloadMonacoWorkers'
 import { createRafScheduler } from './utils/raf'
-import { registerMonacoThemes, setThemeRegisterPromise } from './utils/registerMonacoThemes'
+import { clearHighlighterCache, registerMonacoThemes, setThemeRegisterPromise } from './utils/registerMonacoThemes'
 
 const disposals: monaco.IDisposable[] = []
 
@@ -696,6 +696,6 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
   }
 }
 
-export { detectLanguage, isDark, preloadMonacoWorkers, useMonaco }
+export { clearHighlighterCache, detectLanguage, isDark, preloadMonacoWorkers, useMonaco }
 
 export * from './type'

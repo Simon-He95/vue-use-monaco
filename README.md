@@ -529,9 +529,11 @@ pnpm build
 
 ## 致谢
 
-本项目感谢以下开源库的支持：
+### Clearing shiki highlighter cache
 
-- [Monaco Editor](https://microsoft.github.io/monaco-editor/) — 微软出品的强大代码编辑器内核
-- [Shiki](https://shiki.matsu.io/) — 基于 TextMate 语法和 VS Code 主题的代码高亮库
-- [Vue.js](https://vuejs.org/) — 渐进式 JavaScript 框架
-- [@shikijs/monaco](https://github.com/shikijs/shiki) — Shiki 与 Monaco Editor 的集成
+The library caches shiki highlighters internally to avoid recreating them for the same theme combinations. In long-running applications that may dynamically create many distinct theme combinations, you can clear the cache to free memory or reset state (for example in tests or on app shutdown):
+
+- `clearHighlighterCache()` — clears the internal cache
+- `getHighlighterCacheSize()` — returns number of cached entries
+
+Call `clearHighlighterCache()` when you are certain highlighters are no longer needed (for example during teardown), otherwise leaving the cache enabled provides a performance benefit by reusing previously-created highlighters.

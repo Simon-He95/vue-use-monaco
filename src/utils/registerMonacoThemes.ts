@@ -25,6 +25,25 @@ interface HighlighterEntry {
 
 const highlighterCache = new Map<string, HighlighterEntry>()
 
+/**
+ * Clear all cached shiki highlighters.
+ *
+ * Useful for long-running apps that dynamically create many theme combinations,
+ * or in tests to ensure a clean state. Call this when you know the highlighters
+ * are no longer needed (for example on app shutdown) to free memory.
+ */
+export function clearHighlighterCache() {
+  highlighterCache.clear()
+}
+
+/**
+ * Return number of entries currently in the highlighter cache.
+ * Helpful for tests and debugging.
+ */
+export function getHighlighterCacheSize() {
+  return highlighterCache.size
+}
+
 function serializeThemes(themes: (ThemeInput | string | SpecialTheme)[]) {
   return JSON.stringify(
     themes.map(t => typeof t === 'string' ? t : (t as any).name ?? JSON.stringify(t)).sort(),
@@ -37,7 +56,7 @@ async function getOrCreateHighlighter(
 ) {
   const key = serializeThemes(themes)
   const requestedSet = new Set(languages)
-  const existing = highlighterCache.get(key)
+  let existing = highlighterCache.get(key)
 
   if (existing) {
     // if existing entry already covers requested languages, reuse
@@ -52,6 +71,25 @@ async function getOrCreateHighlighter(
       return existing.promise
     }
 
+    // double-check cache in case a concurrent request already replaced/expanded the entry
+    const prev = existing
+    const current = highlighterCache.get(key)
+    if (current && current !== prev) {
+      // if the current cached entry already covers requested languages, reuse it
+      let allIncludedCurrent = true
+      for (const l of requestedSet) {
+        if (!current.languages.has(l)) {
+          allIncludedCurrent = false
+          break
+        }
+      }
+      if (allIncludedCurrent) {
+        return current.promise
+      }
+      // otherwise prefer the most recent cached entry for the union creation
+      existing = current
+    }
+
     // otherwise create a new highlighter with the union of languages
     const union = new Set<string>([...existing.languages, ...requestedSet])
     const langsArray = Array.from(union)
@@ -59,10 +97,10 @@ async function getOrCreateHighlighter(
     const newEntry: HighlighterEntry = { promise: p, languages: union }
     highlighterCache.set(key, newEntry)
 
-    // if creation fails, try to restore previous entry
+    // if creation fails, try to restore previous entry (prev)
     p.catch(() => {
-      if (highlighterCache.get(key) === newEntry && existing) {
-        highlighterCache.set(key, existing)
+      if (highlighterCache.get(key) === newEntry && prev) {
+        highlighterCache.set(key, prev)
       }
     })
 
