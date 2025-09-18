@@ -9,4 +9,11 @@ export default defineConfig({
       'vue-use-monaco': path.resolve(__dirname, '../../src'),
     },
   },
+  // Prevent Vite from pre-bundling the local package. If Vite optimizes it into
+  // node_modules/.vite/deps, relative worker URLs can be rewritten to that
+  // location and may become unreachable. Excluding the package keeps it as
+  // source so `new URL('./worker/..', import.meta.url)` resolves correctly.
+  optimizeDeps: {
+    exclude: ['vue-use-monaco'],
+  },
 })

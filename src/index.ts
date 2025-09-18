@@ -13,8 +13,6 @@ import { preloadMonacoWorkers } from './preloadMonacoWorkers'
 import { createRafScheduler } from './utils/raf'
 import { registerMonacoThemes, setThemeRegisterPromise } from './utils/registerMonacoThemes'
 
-preloadMonacoWorkers()
-
 const disposals: monaco.IDisposable[] = []
 
 /**
