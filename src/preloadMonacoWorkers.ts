@@ -33,4 +33,25 @@ export async function preloadMonacoWorkers(): Promise<void> {
     // swallow errors - preloading is best-effort
 
   }
+
+  const urls = Object.values(workerUrlByLabel)
+  // insert preload links for each unique href
+  const seen = new Set<string>()
+  for (const u of urls) {
+    const href = u.href
+    if (seen.has(href))
+      continue
+    seen.add(href)
+    try {
+      const link = document.createElement('link')
+      link.rel = 'preload'
+      link.as = 'script'
+      link.href = href
+      // noop if adding fails
+      document.head.appendChild(link)
+    }
+    catch {
+      // ignore DOM insertion errors
+    }
+  }
 }
