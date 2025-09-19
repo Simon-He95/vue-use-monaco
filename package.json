@@ -59,8 +59,8 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "vue": ">=3.0.0",
-    "monaco-editor": "0.52.2"
+    "monaco-editor": "0.52.2",
+    "vue": ">=3.0.0"
   },
   "dependencies": {
     "@shikijs/monaco": "^3.12.2",

@@ -46,13 +46,22 @@ export class DiffEditorManager {
   private computedHeight(): number {
     if (!this.diffEditorView)
       return Math.min(1 * 18 + padding, this.maxHeightValue)
-    const modifiedEditor = this.diffEditorView.getModifiedEditor()
-    const originalEditor = this.diffEditorView.getOriginalEditor()
-    const lineHeight = modifiedEditor.getOption(monaco.editor.EditorOption.lineHeight)
-    const oCount = originalEditor.getModel()?.getLineCount() ?? 1
-    const mCount = modifiedEditor.getModel()?.getLineCount() ?? 1
-    const lineCount = Math.max(oCount, mCount)
-    return Math.min(lineCount * lineHeight + padding, this.maxHeightValue)
+    try {
+      const modifiedEditor = this.diffEditorView.getModifiedEditor()
+      const originalEditor = this.diffEditorView.getOriginalEditor()
+      const lineHeight = modifiedEditor.getOption(monaco.editor.EditorOption.lineHeight)
+      const oCount = originalEditor.getModel()?.getLineCount() ?? 1
+      const mCount = modifiedEditor.getModel()?.getLineCount() ?? 1
+      const lineCount = Math.max(oCount, mCount)
+      const fromLines = lineCount * lineHeight + padding
+      // prefer rendered scrollHeight when available (covers view zones, inline diffs, wrapping)
+      const scrollH = Math.max(originalEditor.getScrollHeight?.() ?? 0, modifiedEditor.getScrollHeight?.() ?? 0)
+      const desired = Math.max(fromLines, scrollH)
+      return Math.min(desired, this.maxHeightValue)
+    }
+    catch {
+      return Math.min(1 * 18 + padding, this.maxHeightValue)
+    }
   }
 
   private hasVerticalScrollbarModified(): boolean {
@@ -63,7 +72,10 @@ export class DiffEditorManager {
         return true
       const me = this.diffEditorView.getModifiedEditor()
       const ch = this.cachedComputedHeightDiff ?? this.computedHeight()
-      return this._hasScrollBar = (me.getScrollHeight!() > ch + padding / 2)
+      // add a tiny epsilon so 1px differences (rounding/layout) don't flip the scrollbar prematurely
+      const lineHeight = me.getOption?.(monaco.editor.EditorOption.lineHeight) ?? 16
+      const epsilon = Math.max(2, Math.round(lineHeight / 8))
+      return this._hasScrollBar = (me.getScrollHeight!() > ch + Math.max(padding / 2, epsilon))
     }
     catch {
       return false
