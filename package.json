@@ -47,8 +47,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsdown && npm run copy-workers",
-    "copy-workers": "mkdir -p dist/worker && cp -R src/worker/* dist/worker/",
+    "build": "tsdown",
     "dev": "npm run build -- --watch src",
     "format": "prettier --write --cache .",
     "lint": "eslint . --cache",
@@ -60,11 +59,12 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "vue": ">=3.0.0"
+    "vue": ">=3.0.0",
+    "monaco-editor": "0.52.2"
   },
   "dependencies": {
     "@shikijs/monaco": "^3.12.2",
-    "monaco-editor": "^0.52.2",
+    "monaco-editor": "0.52.2",
     "shiki": "^3.12.2",
     "vue": "^3.5.21"
   },
