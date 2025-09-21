@@ -11,7 +11,7 @@ import { isDark } from './isDark'
 import { computeMinimalEdit } from './minimalEdit'
 import { preloadMonacoWorkers } from './preloadMonacoWorkers'
 import { createRafScheduler } from './utils/raf'
-import { clearHighlighterCache, registerMonacoThemes, setThemeRegisterPromise } from './utils/registerMonacoThemes'
+import { clearHighlighterCache, getOrCreateHighlighter, registerMonacoThemes, setHighlighterTheme, setThemeRegisterPromise } from './utils/registerMonacoThemes'
 
 const disposals: monaco.IDisposable[] = []
 
@@ -128,6 +128,8 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
   const autoScrollThresholdPx = monacoOptions.autoScrollThresholdPx ?? 32
   const autoScrollThresholdLines = monacoOptions.autoScrollThresholdLines ?? 2
   const diffAutoScroll = monacoOptions.diffAutoScroll ?? true
+  // whether to also keep shiki highlighter in sync when switching themes
+  const syncShikiHighlighter = monacoOptions.syncShikiHighlighter ?? false
 
   // 处理 MAX_HEIGHT，转换为数值和CSS字符串
   const getMaxHeightValue = (): number => {
@@ -638,18 +640,68 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     updateModified,
     appendOriginal,
     appendModified,
-    setTheme(theme: MonacoTheme) {
-      if (themes.includes(theme)) {
-        monaco.editor.setTheme(
-          typeof theme === 'string' ? theme : (theme as any).name,
-        )
+    async setTheme(theme: MonacoTheme) {
+      const themeName = typeof theme === 'string' ? theme : (theme as any).name
+
+      // Ensure themes are registered. registerMonacoThemes may return synchronously
+      // or asynchronously depending on shiki loading. Use setThemeRegisterPromise
+      // to avoid concurrent registrations.
+      try {
+        // Wait for any in-flight registration or start one if none.
+        await setThemeRegisterPromise(registerMonacoThemes(themes, languages))
       }
-      else {
-        console.warn(
-          `Theme "${theme}" is not registered. Available themes: ${themes.join(
-            ', ',
-          )}`,
-        )
+      catch {
+        // swallow; we'll still try to set theme and attempt registration fallback below
+        // (errors will be logged when setTheme actually fails)
+      }
+
+      // If theme isn't in the configured list, attempt to register it on-the-fly
+      const availableNames = themes.map(t => (typeof t === 'string' ? t : (t as any).name))
+      if (!availableNames.includes(themeName)) {
+        // Try to register the single theme (append to themes and register)
+        try {
+          // If themes array is frozen or not intended to be mutated, fall back to attempting registration only
+          // We'll call registerMonacoThemes with an extended list so shiki/monaco can load the new theme
+          const extended = availableNames.concat(themeName)
+          await setThemeRegisterPromise(registerMonacoThemes(extended as any, languages))
+          // ensure the shiki highlighter is using the new theme as well
+          try {
+            await setHighlighterTheme(extended as any, languages, themeName)
+          }
+          catch {
+            // ignore
+          }
+        }
+        catch {
+          console.warn(`Theme "${themeName}" is not registered and automatic registration failed. Available themes: ${availableNames.join(', ')}`)
+          return
+        }
+      }
+
+      try {
+        // optionally keep shiki highlighter synced (fast no-op if highlighter already uses it)
+        if (syncShikiHighlighter) {
+          try {
+            await setHighlighterTheme(themes, languages, themeName)
+          }
+          catch {
+            // ignore
+          }
+        }
+
+        monaco.editor.setTheme(themeName)
+        lastAppliedTheme = themeName
+      }
+      catch {
+        // Last-resort: try registering again then set
+        try {
+          await registerMonacoThemes(themes, languages)
+          monaco.editor.setTheme(themeName)
+          lastAppliedTheme = themeName
+        }
+        catch (err2) {
+          console.warn(`Failed to set theme "${themeName}":`, err2)
+        }
       }
     },
     setLanguage(language: MonacoLanguage) {
@@ -693,9 +745,12 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     getDiffModels() {
       return { original: originalModel, modified: modifiedModel }
     },
+    getMonacoInstance() {
+      return monaco
+    },
   }
 }
 
-export { clearHighlighterCache, detectLanguage, isDark, preloadMonacoWorkers, useMonaco }
+export { clearHighlighterCache, detectLanguage, getOrCreateHighlighter, isDark, preloadMonacoWorkers, registerMonacoThemes, setHighlighterTheme, useMonaco }
 
 export * from './type'

@@ -53,7 +53,7 @@ function serializeThemes(themes: (ThemeInput | string | SpecialTheme)[]) {
 async function getOrCreateHighlighter(
   themes: (ThemeInput | string | SpecialTheme)[],
   languages: string[],
-) {
+): Promise<import('../type').ShikiHighlighter> {
   const key = serializeThemes(themes)
   const requestedSet = new Set(languages)
   let existing = highlighterCache.get(key)
@@ -118,10 +118,35 @@ async function getOrCreateHighlighter(
   })
   return p
 }
+// Exported for callers that need direct access to the shiki highlighter
+export { getOrCreateHighlighter }
+
+/**
+ * Update the theme used by the shiki highlighter for a given themes+languages
+ * combination. Useful when Monaco themes are already registered (so switching
+ * Monaco only requires `monaco.editor.setTheme`) but you also want shiki's
+ * standalone renderer to use the new theme without recreating everything.
+ */
+export async function setHighlighterTheme(
+  themes: (ThemeInput | string | SpecialTheme)[],
+  languages: string[],
+  themeName: string,
+) {
+  const highlighter = await getOrCreateHighlighter(themes, languages)
+  // shiki highlighter exposes setTheme in runtime; call it if available
+  if (highlighter && typeof (highlighter as any).setTheme === 'function') {
+    try {
+      await (highlighter as any).setTheme(themeName)
+    }
+    catch {
+      // ignore errors from shiki setTheme; caller can decide fallback behaviour
+    }
+  }
+}
 export async function registerMonacoThemes(
   themes: (ThemeInput | string | SpecialTheme)[],
   languages: string[],
-) {
+): Promise<import('../type').ShikiHighlighter | null> {
   registerMonacoLanguages(languages)
 
   if (
@@ -129,7 +154,9 @@ export async function registerMonacoThemes(
     && arraysEqual(themes, currentThemes)
     && arraysEqual(languages, currentLanguages)
   ) {
-    return
+    // return existing highlighter if available
+    const existing = highlighterCache.get(serializeThemes(themes))
+    return existing ? existing.promise : Promise.resolve(null)
   }
 
   const p = (async () => {
@@ -139,11 +166,13 @@ export async function registerMonacoThemes(
     themesRegistered = true
     currentThemes = themes
     currentLanguages = languages
+    return highlighter
   })()
 
   setThemeRegisterPromise(p)
   try {
-    await p
+    const res = await p
+    return res
   }
   catch (e) {
     setThemeRegisterPromise(null)
