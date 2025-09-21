@@ -327,11 +327,6 @@ export interface MonacoOptions
    * 默认 true（与单编辑器体验保持一致）。
    */
   diffAutoScroll?: boolean
-  /**
-   * 当为 true 时，主题切换会同时尝试同步 shiki 的 highlighter（用于页面内独立 shiki 渲染）
-   * 默认 false
-   */
-  syncShikiHighlighter?: boolean
   // 添加在编辑器创建之前的钩子
   onBeforeCreate?: (
     monaco: typeof import('monaco-editor'),

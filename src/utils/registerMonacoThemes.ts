@@ -127,22 +127,10 @@ export { getOrCreateHighlighter }
  * Monaco only requires `monaco.editor.setTheme`) but you also want shiki's
  * standalone renderer to use the new theme without recreating everything.
  */
-export async function setHighlighterTheme(
-  themes: (ThemeInput | string | SpecialTheme)[],
-  languages: string[],
-  themeName: string,
-) {
-  const highlighter = await getOrCreateHighlighter(themes, languages)
-  // shiki highlighter exposes setTheme in runtime; call it if available
-  if (highlighter && typeof (highlighter as any).setTheme === 'function') {
-    try {
-      await (highlighter as any).setTheme(themeName)
-    }
-    catch {
-      // ignore errors from shiki setTheme; caller can decide fallback behaviour
-    }
-  }
-}
+// NOTE: setHighlighterTheme removed — switching Monaco theme via
+// `monaco.editor.setTheme(themeName)` is sufficient for editor theme changes.
+// If consumers need to directly control a shiki highlighter they can use
+// `getOrCreateHighlighter(...)` and call methods on the returned object.
 export async function registerMonacoThemes(
   themes: (ThemeInput | string | SpecialTheme)[],
   languages: string[],

@@ -5,14 +5,13 @@ This minimal example shows how to keep Monaco editor themes and standalone Shiki
 Goal
 
 - Register (or pre-register) themes and languages for both Monaco and Shiki.
-- Use `syncShikiHighlighter: true` in `useMonaco` so theme switching also updates the Shiki highlighter.
 - Optionally reuse the returned Shiki highlighter from `registerMonacoThemes` for rendering HTML snippets.
 
 Files
 
 - A simple Vue component (see snippet below) that:
   - calls `registerMonacoThemes` to preload themes & languages,
-  - creates an editor with `syncShikiHighlighter: true`,
+  - creates an editor and uses a preloaded Shiki highlighter for manual preview rendering,
   - switches theme via `setTheme` and also renders a Shiki HTML snippet using the returned highlighter.
 
 Quick steps
@@ -64,7 +63,6 @@ onMounted(async () => {
 const { createEditor, setTheme } = useMonaco({
   themes: allThemes,
   languages: allLanguages,
-  syncShikiHighlighter: true,
 })
 
 onMounted(async () => {
@@ -127,7 +125,7 @@ function switchToLight() {
 Notes
 
 - `registerMonacoThemes` now returns the Shiki highlighter Promise — you can reuse it to render static snippets or to call `setTheme` on the highlighter directly.
-- `syncShikiHighlighter: true` makes `useMonaco` attempt to call `setHighlighterTheme(...)` when `setTheme` is invoked; this is best-effort and can be disabled if you prefer manual control.
+If you need to keep standalone Shiki-rendered snippets in sync when changing the editor theme, call `registerMonacoThemes(...)` to obtain the Shiki highlighter and then call its `setTheme(...)` / `codeToHtml(...)` methods yourself. The example demonstrates preloading and manual usage.
 - If you preload a *full* set of themes & languages at app start, the library will reuse the same highlighter instance and avoid re-creating it on theme changes.
 
 Troubleshooting

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { registerMonacoThemes, setHighlighterTheme } from '../src/utils/registerMonacoThemes'
+import { registerMonacoThemes } from '../src/utils/registerMonacoThemes'
 
 // Mock the module under test to avoid resolving heavy deps (monaco/shiki) during test bundling
 vi.mock('../src/utils/registerMonacoThemes', () => {
@@ -9,7 +9,7 @@ vi.mock('../src/utils/registerMonacoThemes', () => {
       setTheme: async () => undefined,
       codeToHtml: (code: string) => `<pre>${code}</pre>`,
     }),
-    setHighlighterTheme: async () => undefined,
+  // setHighlighterTheme removed; expose a mock highlighter instead
   }
 })
 
@@ -22,6 +22,7 @@ describe('registerMonacoThemes (API)', () => {
     expect(highlighter).toBeTruthy()
     expect(typeof highlighter.codeToHtml).toBe('function')
 
-    await expect(setHighlighterTheme(themes as any, langs, 'vitesse-dark')).resolves.toBeUndefined()
+    // previously tested setHighlighterTheme; removed in refactor — ensure highlighter is usable
+    expect(typeof (highlighter as any).setTheme === 'function' || typeof (highlighter as any).codeToHtml === 'function').toBeTruthy()
   })
 })

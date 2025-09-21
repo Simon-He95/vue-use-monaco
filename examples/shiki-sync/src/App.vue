@@ -106,7 +106,6 @@ async function retryLoad() {
 const { createEditor, setTheme } = useMonaco({
   themes: allThemes,
   languages: allLanguages,
-  syncShikiHighlighter: true,
 })
 
 onMounted(async () => {

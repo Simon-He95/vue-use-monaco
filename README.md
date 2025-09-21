@@ -23,12 +23,11 @@
 本库现在在包根导出了若干与主题/高亮器相关的辅助函数，便于高级用法：
 
 - `registerMonacoThemes(themes, languages): Promise<Highlighter>` — 使用 shiki 创建或获取高亮器并把主题注册到 Monaco，返回解析为 shiki highlighter 的 Promise，便于复用（例如渲染页面片段）。
-- `setHighlighterTheme(themes, languages, themeName): Promise<void>` — 尝试将指定 highlighter 的主题切换到 `themeName`，用于同步独立的 shiki 渲染。
-- `getOrCreateHighlighter(themes, languages): Promise<Highlighter>` — 直接获取或创建一个 highlighter（并受内部缓存管理）。
+`getOrCreateHighlighter(themes, languages): Promise<Highlighter>` — 直接获取或创建一个 highlighter（并受内部缓存管理）。如需直接控制 shiki highlighter（例如调用 `codeToHtml` 或 `setTheme`），请使用此方法并自行处理加载/错误逻辑。
 
-注意：如果你只使用 Monaco 编辑器并在 `createEditor` 时传入了全量 `themes`，通常只需调用 `monaco.editor.setTheme(themeName)` 即可；`syncShikiHighlighter` 选项（见下）用于在同时使用独立 shiki 渲染时保持同步。
+注意：如果你只使用 Monaco 编辑器并在 `createEditor` 时传入了全量 `themes`，通常只需调用 `monaco.editor.setTheme(themeName)` 即可。
 
-配置：`useMonaco({ syncShikiHighlighter?: boolean })` — 默认 `false`。当为 `true` 时，库会在调用 `setTheme` 时尝试同时调用 `setHighlighterTheme` 以同步 shiki highlighter（这是一个 best-effort 的操作，可能在某些构建或环境中是 no-op）。
+配置：`useMonaco()` 不会自动同步 Shiki highlighter；如果你需要在切换主题时同步页面中独立的 Shiki 渲染，请手动使用 `getOrCreateHighlighter(...)` 并调用高亮器实例的 `setTheme`。
 
 ### 安装
 
@@ -251,34 +250,33 @@ onMounted(async () => {
 })
 ```
 
-### Shiki 高亮器同步（高级）
+### Shiki 高亮器（高级说明）
 
-如果你在页面上除了 Monaco 编辑器外还使用 Shiki 的 highlighter 单独渲染代码片段（例如静态 HTML 片段），并希望主题切换时两者保持同步，可使用下面的配置与 API：
+如果你在页面上除了 Monaco 编辑器外还使用 Shiki 的 highlighter 单独渲染代码片段（例如静态 HTML 片段），推荐的做法是：
 
-- 在 `useMonaco` 的配置中启用 `syncShikiHighlighter: true`。这会在 `setTheme` 时尝试同步 shiki highlighter 的主题（默认关闭以避免额外开销）。
-- `registerMonacoThemes(themes, languages)` 现在会返回一个解析为 shiki highlighter 的 Promise，便于你直接复用高亮器实例。
+- 调用 `registerMonacoThemes(themes, languages)` 在应用启动或编辑器创建前预注册需要的主题和语言，函数会返回一个解析为 shiki highlighter 的 Promise，便于你直接复用高亮器实例。
+- 在切换主题时，先调用 `monaco.editor.setTheme(themeName)` 更新编辑器，然后显式调用 highlighter 的 `setTheme(themeName)` 或使用 `codeToHtml` 重新渲染页面片段。错误与加载状态应由调用方自行处理。
 
 示例：
 
 ```ts
-import { registerMonacoThemes } from 'vue-use-monaco/dist/utils/registerMonacoThemes'
+import { registerMonacoThemes } from 'vue-use-monaco'
 
 // 在应用启动或创建编辑器前一次性注册全部 themes & langs
 const highlighter = await registerMonacoThemes(allThemes, allLanguages)
 
-// 创建编辑器并启用同步
-const { createEditor, setTheme } = useMonaco({
-  themes: allThemes,
-  languages: allLanguages,
-  syncShikiHighlighter: true,
-})
+// 创建编辑器
+const { createEditor, setTheme } = useMonaco({ themes: allThemes, languages: allLanguages })
 
-// 当你切换主题时，Monaco 会 setTheme，同时库会尝试调用
-// shiki highlighter 的 setTheme 以同步页面上的独立渲染。
+// 当你切换主题时：
 setTheme('vitesse-dark')
-
-// 你也可以直接使用返回的 highlighter 来渲染页面片段
-// const html = highlighter.codeToHtml(code, { lang: 'javascript', theme: 'vitesse-dark' })
+try {
+  await highlighter.setTheme('vitesse-dark')
+  // re-render snippets using highlighter.codeToHtml(...)
+}
+catch (err) {
+  // handle fail-to-load or other errors
+}
 ```
 
 // 批量（同帧）更新，两侧同时变化时更方便

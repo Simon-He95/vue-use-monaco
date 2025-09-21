@@ -11,7 +11,7 @@ import { isDark } from './isDark'
 import { computeMinimalEdit } from './minimalEdit'
 import { preloadMonacoWorkers } from './preloadMonacoWorkers'
 import { createRafScheduler } from './utils/raf'
-import { clearHighlighterCache, getOrCreateHighlighter, registerMonacoThemes, setHighlighterTheme, setThemeRegisterPromise } from './utils/registerMonacoThemes'
+import { clearHighlighterCache, getOrCreateHighlighter, registerMonacoThemes, setThemeRegisterPromise } from './utils/registerMonacoThemes'
 
 const disposals: monaco.IDisposable[] = []
 
@@ -115,7 +115,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
   let modifiedModel: monaco.editor.ITextModel | null = null
   let _hasScrollBar = false
 
-  const themes = monacoOptions.themes ?? defaultThemes
+  const themes = (monacoOptions.themes && monacoOptions.themes?.length) ? monacoOptions.themes : defaultThemes
   if (!Array.isArray(themes) || themes.length < 2) {
     throw new Error(
       'Monaco themes must be an array with at least two themes: [darkTheme, lightTheme]',
@@ -128,8 +128,6 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
   const autoScrollThresholdPx = monacoOptions.autoScrollThresholdPx ?? 32
   const autoScrollThresholdLines = monacoOptions.autoScrollThresholdLines ?? 2
   const diffAutoScroll = monacoOptions.diffAutoScroll ?? true
-  // whether to also keep shiki highlighter in sync when switching themes
-  const syncShikiHighlighter = monacoOptions.syncShikiHighlighter ?? false
 
   // 处理 MAX_HEIGHT，转换为数值和CSS字符串
   const getMaxHeightValue = (): number => {
@@ -665,12 +663,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
           const extended = availableNames.concat(themeName)
           await setThemeRegisterPromise(registerMonacoThemes(extended as any, languages))
           // ensure the shiki highlighter is using the new theme as well
-          try {
-            await setHighlighterTheme(extended as any, languages, themeName)
-          }
-          catch {
-            // ignore
-          }
+          // no-op: we rely on Monaco's theme registration and monaco.editor.setTheme
         }
         catch {
           console.warn(`Theme "${themeName}" is not registered and automatic registration failed. Available themes: ${availableNames.join(', ')}`)
@@ -680,14 +673,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
 
       try {
         // optionally keep shiki highlighter synced (fast no-op if highlighter already uses it)
-        if (syncShikiHighlighter) {
-          try {
-            await setHighlighterTheme(themes, languages, themeName)
-          }
-          catch {
-            // ignore
-          }
-        }
+        // no-op for shiki sync — Monaco theme application is sufficient for editor visuals
 
         monaco.editor.setTheme(themeName)
         lastAppliedTheme = themeName
@@ -751,6 +737,6 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
   }
 }
 
-export { clearHighlighterCache, detectLanguage, getOrCreateHighlighter, isDark, preloadMonacoWorkers, registerMonacoThemes, setHighlighterTheme, useMonaco }
+export { clearHighlighterCache, detectLanguage, getOrCreateHighlighter, isDark, preloadMonacoWorkers, registerMonacoThemes, useMonaco }
 
 export * from './type'
