@@ -121,6 +121,7 @@ export class EditorManager {
       },
       ...this.options,
     })
+    monaco.editor.setTheme(currentTheme)
 
     this.lastKnownCode = this.editorView.getValue()
 

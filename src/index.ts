@@ -13,8 +13,6 @@ import { preloadMonacoWorkers } from './preloadMonacoWorkers'
 import { createRafScheduler } from './utils/raf'
 import { clearHighlighterCache, getOrCreateHighlighter, registerMonacoThemes, setThemeRegisterPromise } from './utils/registerMonacoThemes'
 
-const disposals: monaco.IDisposable[] = []
-
 /**
  * useMonaco 组合式函数
  *
@@ -100,6 +98,8 @@ const disposals: monaco.IDisposable[] = []
  * ```
  */
 function useMonaco(monacoOptions: MonacoOptions = {}) {
+  // per-instance disposables (avoid cross-instance interference)
+  const disposals: monaco.IDisposable[] = []
   // 清除之前在 onBeforeCreate 中注册的资源
   if (monacoOptions.isCleanOnBeforeCreate ?? true)
     disposals.forEach(d => d.dispose())
@@ -159,6 +159,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
   let shouldAutoScroll = true
   let scrollWatcher: monaco.IDisposable | null = null
   // cached computed height (min(lineCount*lineHeight + padding, maxHeightValue))
+  // make mutable so it can be updated when layout/content changes
   const cachedComputedHeight: number | null = null
   // append buffers to batch multiple small appends into a single edit per RAF
   const appendBuffer: string[] = []
@@ -180,6 +181,74 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
 
   // RAF scheduler (injectable time source possible via utils)
   const rafScheduler = createRafScheduler()
+
+  // Internal helper that applies a theme and invokes MonacoOptions.onThemeChange
+  // after the theme has been applied. Exposed internally so watchers can call
+  // the same logic and callers can await exported setTheme for completion.
+  async function setThemeInternal(theme: MonacoTheme, force = false): Promise<void> {
+    const themeName = typeof theme === 'string' ? theme : (theme as any).name
+
+    if (!force && themeName === lastAppliedTheme) {
+      return
+    }
+
+    try {
+      await setThemeRegisterPromise(registerMonacoThemes(themes, languages))
+    }
+    catch {
+      // ignore registration errors; we'll still attempt to set the theme
+    }
+
+    const availableNames = themes.map(t => (typeof t === 'string' ? t : (t as any).name))
+    if (!availableNames.includes(themeName)) {
+      try {
+        const extended = availableNames.concat(themeName)
+        const maybeHighlighter = await setThemeRegisterPromise(registerMonacoThemes(extended as any, languages))
+        if (maybeHighlighter && typeof maybeHighlighter.setTheme === 'function') {
+          try {
+            await maybeHighlighter.setTheme(themeName)
+          }
+          catch { }
+        }
+      }
+      catch {
+        console.warn(`Theme "${themeName}" is not registered and automatic registration failed. Available themes: ${availableNames.join(', ')}`)
+        return
+      }
+    }
+
+    try {
+      monaco.editor.setTheme(themeName)
+      lastAppliedTheme = themeName
+    }
+    catch {
+      try {
+        const maybeHighlighter = await registerMonacoThemes(themes, languages)
+        monaco.editor.setTheme(themeName)
+        lastAppliedTheme = themeName
+        if (maybeHighlighter && typeof maybeHighlighter.setTheme === 'function') {
+          try {
+            await maybeHighlighter.setTheme(themeName)
+          }
+          catch { }
+        }
+      }
+      catch (err2) {
+        console.warn(`Failed to set theme "${themeName}":`, err2)
+        return
+      }
+    }
+
+    // call user callback if provided; await to allow callers to observe completion
+    try {
+      if (typeof monacoOptions.onThemeChange === 'function') {
+        await monacoOptions.onThemeChange(themeName as any)
+      }
+    }
+    catch (err) {
+      console.warn('onThemeChange callback threw an error:', err)
+    }
+  }
 
   // height management is handled within EditorManager/DiffEditorManager
 
@@ -252,17 +321,22 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     )
     editorView = await editorMgr.createEditor(container, code, language, initialThemeName)
 
-    // Watch theme changes
-    themeWatcher = watch(
-      () => isDark.value,
-      () => {
-        if (currentTheme.value !== lastAppliedTheme) {
-          monaco.editor.setTheme(currentTheme.value)
-          lastAppliedTheme = currentTheme.value
-        }
-      },
-      { flush: 'post', immediate: true },
-    )
+    if (typeof monacoOptions.onThemeChange === 'function') {
+      monacoOptions.onThemeChange(initialThemeName as any)
+    }
+    // Watch theme changes - use internal setter so onThemeChange is invoked
+    if (!monacoOptions.theme) {
+      themeWatcher = watch(
+        () => isDark.value,
+        () => {
+          const t = currentTheme.value
+          if (t !== lastAppliedTheme) {
+            void setThemeInternal(t)
+          }
+        },
+        { flush: 'post', immediate: true },
+      )
+    }
 
     try {
       if (editorView)
@@ -329,17 +403,22 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     )
     diffEditorView = await diffMgr.createDiffEditor(container, originalCode, modifiedCode, language, initialThemeName)
 
-    // 主题监听
-    themeWatcher = watch(
-      () => isDark.value,
-      () => {
-        if (currentTheme.value !== lastAppliedTheme) {
-          monaco.editor.setTheme(currentTheme.value)
-          lastAppliedTheme = currentTheme.value
-        }
-      },
-      { flush: 'post', immediate: true },
-    )
+    if (typeof monacoOptions.onThemeChange === 'function') {
+      monacoOptions.onThemeChange(initialThemeName as any)
+    }
+    // 主题监听 - use internal setter so onThemeChange is invoked
+    if (!monacoOptions.theme) {
+      themeWatcher = watch(
+        () => isDark.value,
+        () => {
+          const t = currentTheme.value
+          if (t !== lastAppliedTheme) {
+            void setThemeInternal(t)
+          }
+        },
+        { flush: 'post', immediate: true },
+      )
+    }
 
     // cache models for getters
     const models = diffMgr.getDiffModels()
@@ -652,80 +731,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     updateModified,
     appendOriginal,
     appendModified,
-    async setTheme(theme: MonacoTheme, force = false): Promise<void> {
-      const themeName = typeof theme === 'string' ? theme : (theme as any).name
-
-      // If the requested theme was already applied and caller didn't force
-      // reapplication, do nothing. This avoids visual glitches and expensive
-      // re-registration work when not necessary.
-      if (!force && themeName === lastAppliedTheme) {
-        return
-      }
-
-      // Ensure themes are registered. registerMonacoThemes may return synchronously
-      // or asynchronously depending on shiki loading. Use setThemeRegisterPromise
-      // to avoid concurrent registrations.
-      try {
-        // Wait for any in-flight registration or start one if none.
-        // setThemeRegisterPromise may resolve to a shiki highlighter or null.
-        await setThemeRegisterPromise(registerMonacoThemes(themes, languages))
-      }
-      catch {
-        // swallow; we'll still try to set theme and attempt registration fallback below
-        // (errors will be logged when setTheme actually fails)
-      }
-
-      // If theme isn't in the configured list, attempt to register it on-the-fly
-      const availableNames = themes.map(t => (typeof t === 'string' ? t : (t as any).name))
-      if (!availableNames.includes(themeName)) {
-        // Try to register the single theme (append to themes and register)
-        try {
-          // If themes array is frozen or not intended to be mutated, fall back to attempting registration only
-          // We'll call registerMonacoThemes with an extended list so shiki/monaco can load the new theme
-          const extended = availableNames.concat(themeName)
-          const maybeHighlighter = await setThemeRegisterPromise(registerMonacoThemes(extended as any, languages))
-          // if a shiki highlighter was returned, attempt to set its theme as well
-          if (maybeHighlighter && typeof maybeHighlighter.setTheme === 'function') {
-            try {
-              await maybeHighlighter.setTheme(themeName)
-            }
-            catch {
-              // ignore highlighter setTheme errors
-            }
-          }
-        }
-        catch {
-          console.warn(`Theme "${themeName}" is not registered and automatic registration failed. Available themes: ${availableNames.join(', ')}`)
-          return
-        }
-      }
-
-      try {
-        // optionally keep shiki highlighter synced (fast no-op if highlighter already uses it)
-        // no-op for shiki sync — Monaco theme application is sufficient for editor visuals
-
-        monaco.editor.setTheme(themeName)
-        lastAppliedTheme = themeName
-      }
-      catch {
-        // Last-resort: try registering again then set
-        try {
-          const maybeHighlighter = await registerMonacoThemes(themes, languages)
-          monaco.editor.setTheme(themeName)
-          lastAppliedTheme = themeName
-          if (maybeHighlighter && typeof maybeHighlighter.setTheme === 'function') {
-            try {
-              await maybeHighlighter.setTheme(themeName)
-            }
-            catch { }
-          }
-        }
-        catch (err2) {
-          console.warn(`Failed to set theme "${themeName}":`, err2)
-        }
-      }
-      // resolve when both Monaco and (optionally) shiki highlighter have applied the theme
-    },
+    setTheme: setThemeInternal,
     setLanguage(language: MonacoLanguage) {
       if (editorMgr) {
         editorMgr.setLanguage(language, languages as any)

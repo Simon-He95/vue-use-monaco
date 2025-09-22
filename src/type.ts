@@ -331,4 +331,10 @@ export interface MonacoOptions
   onBeforeCreate?: (
     monaco: typeof import('monaco-editor'),
   ) => monaco.IDisposable[]
+  /**
+   * Optional callback that is invoked after a theme change has been applied.
+   * This callback will be awaited when possible so callers can track completion
+   * of theme application. It receives the name of the applied theme.
+   */
+  onThemeChange?: (theme: MonacoTheme) => void | Promise<void>
 }
