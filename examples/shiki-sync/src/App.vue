@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ShikiHighlighter } from 'vue-use-monaco'
 import { onMounted, ref } from 'vue'
-import { registerMonacoThemes, useMonaco } from 'vue-use-monaco'
+import { registerMonacoThemes, useMonaco } from '../../../src'
 
 const container = ref<HTMLElement | null>(null)
 const preview = ref<HTMLDivElement | null>(null)
@@ -106,6 +106,7 @@ async function retryLoad() {
 const { createEditor, setTheme } = useMonaco({
   themes: allThemes,
   languages: allLanguages,
+  theme: selectedTheme.value,
 })
 
 onMounted(async () => {

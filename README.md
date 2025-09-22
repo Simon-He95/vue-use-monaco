@@ -167,8 +167,15 @@ onMounted(async () => {
 })
 
 // 主题切换
-function switchTheme(theme: MonacoTheme) {
-  setTheme(theme)
+// 主题切换（示例：异步等待与强制重应用）
+// setTheme 返回一个 Promise，resolve 表示主题已经应用到 Monaco（并在可能的情况下同步到 shiki highlighter）
+// 如果希望即便当前主题相同也强制重新应用（例如强制重新渲染页面中的 shiki 片段），传入第二个参数 true
+async function switchTheme(theme: MonacoTheme) {
+  // 普通调用（自动跳过与当前相同的主题）
+  await setTheme(theme)
+
+  // 强制应用示例：
+  // await setTheme(theme, true)
 }
 
 // 语言切换

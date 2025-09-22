@@ -1,18 +1,19 @@
 import type { SpecialTheme, ThemeInput } from 'shiki'
 import { shikiToMonaco } from '@shikijs/monaco'
-import * as monaco from 'monaco-editor'
 import { createHighlighter } from 'shiki'
+import * as monaco from '../monaco-shim'
 import { arraysEqual } from './arraysEqual'
 
 let themesRegistered = false
 let languagesRegistered = false
 let currentThemes: (ThemeInput | string | SpecialTheme)[] = []
 let currentLanguages: string[] = []
-let themeRegisterPromise: Promise<void> | null = null
+// promise that resolves to a shiki highlighter or null when registration completes
+let themeRegisterPromise: Promise<import('../type').ShikiHighlighter | null> | null = null
 export function getThemeRegisterPromise() {
   return themeRegisterPromise
 }
-export function setThemeRegisterPromise(p: Promise<void> | null) {
+export function setThemeRegisterPromise(p: Promise<import('../type').ShikiHighlighter | null> | null) {
   return themeRegisterPromise = p
 }
 
