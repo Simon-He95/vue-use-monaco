@@ -168,13 +168,13 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
   let lastAppliedTheme: string | null = null
   const currentTheme = computed<string>(() =>
     monacoOptions.theme
-    ?? isDark.value
+    ?? (isDark.value
       ? typeof themes[0] === 'string'
         ? themes[0]
         : (themes[0] as any).name
       : typeof themes[1] === 'string'
         ? themes[1]
-        : (themes[1] as any).name,
+        : (themes[1] as any).name),
   )
   let themeWatcher: WatchStopHandle | null = null
 
