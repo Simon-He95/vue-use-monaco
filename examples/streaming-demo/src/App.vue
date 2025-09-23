@@ -12,7 +12,7 @@ const {
   themes: ['vitesse-dark', 'vitesse-light'],
   languages: ['markdown', 'typescript'],
   readOnly: false,
-  MAX_HEIGHT: 400,
+  MAX_HEIGHT: 100,
 })
 
 let i = 0
@@ -24,7 +24,7 @@ onMounted(async () => {
   await createEditor(el.value, '# Stream start\n', 'markdown')
   timer = setInterval(() => {
     i++
-    appendCode(`- line ${i}\\n`)
+    appendCode(`- line ${i}\n`)
     if (i === 5)
       setLanguage('typescript')
     if (i >= 10)

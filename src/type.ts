@@ -327,6 +327,24 @@ export interface MonacoOptions
    * 默认 true（与单编辑器体验保持一致）。
    */
   diffAutoScroll?: boolean
+  /**
+   * Debounce time (ms) to coalesce multiple reveal requests into a single
+   * reveal. Useful for streaming/append scenarios. Default: 75
+   */
+  revealDebounceMs?: number
+  /**
+   * How to reveal target line when auto-scrolling.
+   * - 'bottom' : revealLine (closest to bottom)
+   * - 'centerIfOutside' : revealLineInCenterIfOutsideViewport (default)
+   * - 'center' : revealLineInCenter
+   */
+  revealStrategy?: 'bottom' | 'centerIfOutside' | 'center'
+  /**
+   * If set to a positive number (ms), append/streaming scenarios will delay a final
+   * "scroll to bottom" until this idle time has passed since the last append. Useful
+   * to batch many small appends and then perform one final jump to bottom. Default: undefined (disabled).
+   */
+  revealBatchOnIdleMs?: number
   // 添加在编辑器创建之前的钩子
   onBeforeCreate?: (
     monaco: typeof import('monaco-editor'),
@@ -337,4 +355,11 @@ export interface MonacoOptions
    * of theme application. It receives the name of the applied theme.
    */
   onThemeChange?: (theme: MonacoTheme) => void | Promise<void>
+}
+
+// Convenience enum for consumers who prefer a TypeScript constant instead of strings
+export enum RevealStrategy {
+  Bottom = 'bottom',
+  CenterIfOutside = 'centerIfOutside',
+  Center = 'center',
 }

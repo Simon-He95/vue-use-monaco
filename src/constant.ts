@@ -52,3 +52,6 @@ export const defaultScrollbar = {
   alwaysConsumeMouseWheel: false,
 }
 export const padding = 16
+
+// default debounce for reveal (ms) used when revealDebounceMs is not provided
+export const defaultRevealDebounceMs = 75

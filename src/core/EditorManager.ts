@@ -1,6 +1,6 @@
 import type { MonacoLanguage, MonacoOptions } from '../type'
 import { processedLanguage } from '../code.detect'
-import { defaultScrollbar, padding } from '../constant'
+import { defaultRevealDebounceMs, defaultScrollbar, padding } from '../constant'
 import { computeMinimalEdit } from '../minimalEdit'
 import * as monaco from '../monaco-shim'
 import { createHeightManager } from '../utils/height'
@@ -27,6 +27,13 @@ export class EditorManager {
 
   private rafScheduler = createRafScheduler()
   private editorHeightManager: ReturnType<typeof createHeightManager> | null = null
+  // debounce id for reveal to coalesce rapid calls (ms)
+  private revealDebounceId: number | null = null
+  private readonly revealDebounceMs = defaultRevealDebounceMs
+  // idle timer for final batch reveal
+  private revealIdleTimerId: number | null = null
+  private revealStrategyOption?: 'bottom' | 'centerIfOutside' | 'center'
+  private revealBatchOnIdleMsOption?: number
 
   constructor(
     private options: MonacoOptions,
@@ -36,6 +43,7 @@ export class EditorManager {
     private autoScrollInitial: boolean,
     private autoScrollThresholdPx: number,
     private autoScrollThresholdLines: number,
+    private revealDebounceMsOption?: number,
   ) {}
 
   private hasVerticalScrollbar(): boolean {
@@ -85,13 +93,81 @@ export class EditorManager {
     if (this.autoScrollOnUpdate && this.shouldAutoScroll && this.hasVerticalScrollbar()) {
       const model = this.editorView!.getModel()
       const line = targetLine ?? model?.getLineCount() ?? 1
-      this.rafScheduler.schedule('reveal', () => {
+      // if revealBatchOnIdleMs is provided, use idle-batching: delay final reveal until idle
+      const batchMs = this.revealBatchOnIdleMsOption ?? this.options.revealBatchOnIdleMs
+      if (typeof batchMs === 'number' && batchMs > 0) {
         try {
-          this.editorView!.revealLine(line)
+          if (this.revealIdleTimerId != null) {
+            try {
+              clearTimeout(this.revealIdleTimerId)
+            }
+            catch { }
+          }
         }
         catch { }
-      })
+        this.revealIdleTimerId = (setTimeout(() => {
+          this.revealIdleTimerId = null
+          this.performReveal(line)
+        }, batchMs) as unknown) as number
+        return
+      }
+
+      // otherwise use debounce behavior
+      try {
+        if (this.revealDebounceId != null) {
+          try {
+            clearTimeout(this.revealDebounceId)
+          }
+          catch { }
+          this.revealDebounceId = null
+        }
+      }
+      catch { }
+      const ms = (typeof this.revealDebounceMs === 'number' && this.revealDebounceMs > 0)
+        ? this.revealDebounceMs
+        : (typeof this.revealDebounceMsOption === 'number' && this.revealDebounceMsOption > 0)
+            ? this.revealDebounceMsOption
+            : this.revealDebounceMs
+      this.revealDebounceId = (setTimeout(() => {
+        this.revealDebounceId = null
+        this.performReveal(line)
+      }, ms) as unknown) as number
     }
+  }
+
+  private performReveal(line: number) {
+    this.rafScheduler.schedule('reveal', () => {
+      try {
+        const strategy = this.revealStrategyOption ?? this.options.revealStrategy ?? 'centerIfOutside'
+        const ScrollType: any = (monaco as any).ScrollType || (monaco as any).editor?.ScrollType
+        const smooth = (ScrollType && typeof ScrollType.Smooth !== 'undefined') ? ScrollType.Smooth : undefined
+        try {
+          if (strategy === 'bottom') {
+            if (typeof smooth !== 'undefined')
+              this.editorView!.revealLine(line, smooth)
+            else this.editorView!.revealLine(line)
+          }
+          else if (strategy === 'center') {
+            if (typeof smooth !== 'undefined')
+              this.editorView!.revealLineInCenter(line, smooth)
+            else this.editorView!.revealLineInCenter(line)
+          }
+          else {
+            if (typeof smooth !== 'undefined')
+              this.editorView!.revealLineInCenterIfOutsideViewport(line, smooth)
+            else this.editorView!.revealLineInCenterIfOutsideViewport(line)
+          }
+        }
+        catch {
+          // fallback to simple revealLine
+          try {
+            this.editorView!.revealLine(line)
+          }
+          catch { }
+        }
+      }
+      catch { }
+    })
   }
 
   async createEditor(
@@ -132,6 +208,27 @@ export class EditorManager {
       catch { }
       this.editorHeightManager = null
     }
+    // clear any pending reveal debounce
+    try {
+      if (this.revealDebounceId != null) {
+        try {
+          clearTimeout(this.revealDebounceId)
+        }
+        catch { }
+        this.revealDebounceId = null
+      }
+    }
+    catch { }
+    try {
+      if (this.revealIdleTimerId != null) {
+        try {
+          clearTimeout(this.revealIdleTimerId)
+        }
+        catch { }
+        this.revealIdleTimerId = null
+      }
+    }
+    catch { }
     this.editorHeightManager = createHeightManager(container, () => this.computedHeight(this.editorView!))
     this.editorHeightManager.update()
 
@@ -325,7 +422,8 @@ export class EditorManager {
         this.lastKnownCode = this.lastKnownCode + text
       }
       try {
-        this.maybeScrollToBottom(model.getLineCount())
+        if (lastLine !== model.getLineCount())
+          this.maybeScrollToBottom(model.getLineCount())
       }
       catch { }
     }
@@ -392,6 +490,16 @@ export class EditorManager {
       catch { }
       this.scrollWatcher = null
     }
+    try {
+      if (this.revealDebounceId != null) {
+        try {
+          clearTimeout(this.revealDebounceId)
+        }
+        catch { }
+        this.revealDebounceId = null
+      }
+    }
+    catch { }
 
     this._hasScrollBar = false
     this.shouldAutoScroll = !!this.autoScrollInitial

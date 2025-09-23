@@ -3,7 +3,7 @@ import type { MonacoLanguage, MonacoOptions, MonacoTheme } from './type'
 
 import { computed, watch } from 'vue'
 import { detectLanguage, processedLanguage } from './code.detect'
-import { defaultLanguages, defaultThemes, padding } from './constant'
+import { defaultLanguages, defaultRevealDebounceMs, defaultThemes, padding } from './constant'
 import { DiffEditorManager } from './core/DiffEditorManager'
 import { EditorManager } from './core/EditorManager'
 import { isDark } from './isDark'
@@ -267,16 +267,42 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     }
   }
   // 在满足条件时滚动到底部，否则尊重用户滚动状态
+  // debounce id for reveal (module-scope for top-level helper)
+  let revealDebounceId: number | null = null
+  const revealDebounceMs = 75
   function maybeScrollToBottom(targetLine?: number) {
     if (autoScrollOnUpdate && shouldAutoScroll && hasVerticalScrollbar()) {
       const model = editorView!.getModel()
       const line = targetLine ?? model?.getLineCount() ?? 1
-      rafScheduler.schedule('reveal', () => {
-        try {
-          editorView!.revealLine(line)
+
+      try {
+        if (revealDebounceId != null) {
+          try {
+            clearTimeout(revealDebounceId)
+          }
+          catch { }
+          revealDebounceId = null
         }
-        catch { }
-      })
+      }
+      catch { }
+      revealDebounceId = (setTimeout(() => {
+        revealDebounceId = null
+        rafScheduler.schedule('reveal', () => {
+          try {
+            try {
+              const ScrollType: any = (monaco as any).ScrollType || (monaco as any).editor?.ScrollType
+              if (ScrollType && typeof ScrollType.Smooth !== 'undefined')
+                editorView!.revealLineInCenterIfOutsideViewport(line, ScrollType.Smooth)
+              else
+                editorView!.revealLineInCenterIfOutsideViewport(line)
+            }
+            catch {
+              editorView!.revealLineInCenterIfOutsideViewport(line)
+            }
+          }
+          catch { }
+        })
+      }, revealDebounceMs) as unknown) as number
     }
   }
 
@@ -318,6 +344,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
       autoScrollInitial,
       autoScrollThresholdPx,
       autoScrollThresholdLines,
+      monacoOptions.revealDebounceMs,
     )
     editorView = await editorMgr.createEditor(container, code, language, initialThemeName)
 
@@ -400,6 +427,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
       autoScrollThresholdPx,
       autoScrollThresholdLines,
       diffAutoScroll,
+      monacoOptions.revealDebounceMs,
     )
     diffEditorView = await diffMgr.createDiffEditor(container, originalCode, modifiedCode, language, initialThemeName)
 
@@ -632,7 +660,8 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
       }
       // single reveal/scroll call
       try {
-        maybeScrollToBottom(model.getLineCount())
+        if (lastLine !== model.getLineCount())
+          maybeScrollToBottom(model.getLineCount())
       }
       catch {
         // ignore
@@ -779,6 +808,6 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
   }
 }
 
-export { clearHighlighterCache, detectLanguage, getOrCreateHighlighter, isDark, preloadMonacoWorkers, registerMonacoThemes, useMonaco }
+export { clearHighlighterCache, defaultRevealDebounceMs, detectLanguage, getOrCreateHighlighter, isDark, preloadMonacoWorkers, registerMonacoThemes, useMonaco }
 
 export * from './type'

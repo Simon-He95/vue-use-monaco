@@ -1,6 +1,6 @@
 import type { MonacoLanguage, MonacoOptions } from '../type'
 import { processedLanguage } from '../code.detect'
-import { defaultScrollbar, padding } from '../constant'
+import { defaultRevealDebounceMs, defaultScrollbar, padding } from '../constant'
 import { computeMinimalEdit } from '../minimalEdit'
 import * as monaco from '../monaco-shim'
 import { createHeightManager } from '../utils/height'
@@ -15,6 +15,7 @@ export class DiffEditorManager {
 
   private lastKnownOriginalCode: string | null = null
   private lastKnownModifiedCode: string | null = null
+  private lastKnownModifiedLineCount: number | null = null
   private pendingDiffUpdate: { original: string, modified: string, lang?: string } | null = null
 
   private shouldAutoScrollDiff = true
@@ -25,6 +26,16 @@ export class DiffEditorManager {
   private cachedScrollHeightDiff: number | null = null
   private cachedLineHeightDiff: number | null = null
   private cachedComputedHeightDiff: number | null = null
+
+  // track last revealed line to dedupe repeated reveals (prevent jitter)
+  private lastRevealLineDiff: number | null = null
+  // debounce id for reveal to coalesce rapid calls (ms)
+  private revealDebounceIdDiff: number | null = null
+  private readonly revealDebounceMs = defaultRevealDebounceMs
+  // idle timer for final batch reveal
+  private revealIdleTimerIdDiff: number | null = null
+  private revealStrategyOption?: 'bottom' | 'centerIfOutside' | 'center'
+  private revealBatchOnIdleMsOption?: number
 
   private appendBufferDiff: string[] = []
   private appendBufferDiffScheduled = false
@@ -41,6 +52,7 @@ export class DiffEditorManager {
     private autoScrollThresholdPx: number,
     private autoScrollThresholdLines: number,
     private diffAutoScroll: boolean,
+    private revealDebounceMsOption?: number,
   ) {}
 
   private computedHeight(): number {
@@ -109,14 +121,95 @@ export class DiffEditorManager {
     if (this.diffAutoScroll && this.autoScrollOnUpdate && this.shouldAutoScrollDiff && this.hasVerticalScrollbarModified()) {
       const me = this.diffEditorView.getModifiedEditor()
       const model = me.getModel()
-      const line = targetLine ?? model?.getLineCount() ?? 1
-      this.rafScheduler.schedule('revealDiff', () => {
+      const currentLine = model?.getLineCount() ?? 1
+      const line = targetLine ?? currentLine
+
+      // avoid revealing when the line count didn't actually change
+      const prevLine = this.lastKnownModifiedLineCount ?? currentLine
+      if (prevLine === currentLine && line === currentLine)
+        return
+
+      // dedupe repeated reveals to the same line
+      if (this.lastRevealLineDiff !== null && this.lastRevealLineDiff === line)
+        return
+
+      const batchMs = this.revealBatchOnIdleMsOption ?? this.options.revealBatchOnIdleMs
+      if (typeof batchMs === 'number' && batchMs > 0) {
         try {
-          me.revealLine(line)
+          if (this.revealIdleTimerIdDiff != null) {
+            try {
+              clearTimeout(this.revealIdleTimerIdDiff)
+            }
+            catch { }
+          }
         }
         catch { }
-      })
+        this.revealIdleTimerIdDiff = (setTimeout(() => {
+          this.revealIdleTimerIdDiff = null
+          this.performRevealDiff(line)
+        }, batchMs) as unknown) as number
+        return
+      }
+
+      try {
+        if (this.revealDebounceIdDiff != null) {
+          try {
+            clearTimeout(this.revealDebounceIdDiff)
+          }
+          catch { }
+          this.revealDebounceIdDiff = null
+        }
+      }
+      catch { }
+      const ms = (typeof this.revealDebounceMs === 'number' && this.revealDebounceMs > 0)
+        ? this.revealDebounceMs
+        : (typeof this.revealDebounceMsOption === 'number' && this.revealDebounceMsOption > 0)
+            ? this.revealDebounceMsOption
+            : this.revealDebounceMs
+      this.revealDebounceIdDiff = (setTimeout(() => {
+        this.revealDebounceIdDiff = null
+        this.performRevealDiff(line)
+      }, ms) as unknown) as number
+
+      // update cached known line count
+      this.lastKnownModifiedLineCount = currentLine
     }
+  }
+
+  private performRevealDiff(line: number) {
+    this.rafScheduler.schedule('revealDiff', () => {
+      try {
+        const strategy = this.revealStrategyOption ?? this.options.revealStrategy ?? 'centerIfOutside'
+        const ScrollType: any = (monaco as any).ScrollType || (monaco as any).editor?.ScrollType
+        const smooth = (ScrollType && typeof ScrollType.Smooth !== 'undefined') ? ScrollType.Smooth : undefined
+        try {
+          const me = this.diffEditorView!.getModifiedEditor()
+          if (strategy === 'bottom') {
+            if (typeof smooth !== 'undefined')
+              me.revealLine(line, smooth)
+            else me.revealLine(line)
+          }
+          else if (strategy === 'center') {
+            if (typeof smooth !== 'undefined')
+              me.revealLineInCenter(line, smooth)
+            else me.revealLineInCenter(line)
+          }
+          else {
+            if (typeof smooth !== 'undefined')
+              me.revealLineInCenterIfOutsideViewport(line, smooth)
+            else me.revealLineInCenterIfOutsideViewport(line)
+          }
+        }
+        catch {
+          try {
+            this.diffEditorView!.getModifiedEditor().revealLine(line)
+          }
+          catch { }
+        }
+        this.lastRevealLineDiff = line
+      }
+      catch { }
+    })
   }
 
   async createDiffEditor(
@@ -415,6 +508,18 @@ export class DiffEditorManager {
       this.lastContainer.innerHTML = ''
       this.lastContainer = null
     }
+    // clear any pending reveal debounce and reset last reveal cache
+    try {
+      if (this.revealDebounceIdDiff != null) {
+        try {
+          clearTimeout(this.revealDebounceIdDiff)
+        }
+        catch { }
+        this.revealDebounceIdDiff = null
+      }
+    }
+    catch { }
+    this.lastRevealLineDiff = null
   }
 
   safeClean() {
@@ -440,6 +545,17 @@ export class DiffEditorManager {
       catch { }
       this.diffHeightManager = null
     }
+    try {
+      if (this.revealDebounceIdDiff != null) {
+        try {
+          clearTimeout(this.revealDebounceIdDiff)
+        }
+        catch { }
+        this.revealDebounceIdDiff = null
+      }
+    }
+    catch { }
+    this.lastRevealLineDiff = null
   }
 
   private flushPendingDiffUpdate() {
@@ -513,16 +629,23 @@ export class DiffEditorManager {
     const text = this.appendBufferDiff.join('')
     this.appendBufferDiff.length = 0
     try {
-      const lastLine = model.getLineCount()
-      const lastColumn = model.getLineMaxColumn(lastLine)
-      const range = new monaco.Range(lastLine, lastColumn, lastLine, lastColumn)
+      const prevLine = model.getLineCount()
+      const lastColumn = model.getLineMaxColumn(prevLine)
+      const range = new monaco.Range(prevLine, lastColumn, prevLine, lastColumn)
       model.applyEdits([{ range, text, forceMoveMarkers: true }])
       if (this.lastKnownModifiedCode != null)
         this.lastKnownModifiedCode = this.lastKnownModifiedCode + text
-      try {
-        this.maybeScrollDiffToBottom(model.getLineCount())
+
+      // only trigger scroll if the line count changed
+      const newLine = model.getLineCount()
+      if (newLine !== prevLine) {
+        try {
+          this.maybeScrollDiffToBottom(newLine)
+        }
+        catch { }
       }
-      catch { }
+      // keep internal line count cache in sync
+      this.lastKnownModifiedLineCount = newLine
     }
     catch { }
   }
@@ -541,6 +664,12 @@ export class DiffEditorManager {
       rangeEnd.column,
     )
     model.applyEdits([{ range, text: replaceText, forceMoveMarkers: true }])
+    try {
+      if (model === this.modifiedModel) {
+        this.lastKnownModifiedLineCount = model.getLineCount()
+      }
+    }
+    catch { }
   }
 
   private appendToModel(model: monaco.editor.ITextModel, appendText: string) {
@@ -550,5 +679,11 @@ export class DiffEditorManager {
     const lastColumn = model.getLineMaxColumn(lastLine)
     const range = new monaco.Range(lastLine, lastColumn, lastLine, lastColumn)
     model.applyEdits([{ range, text: appendText, forceMoveMarkers: true }])
+    try {
+      if (model === this.modifiedModel) {
+        this.lastKnownModifiedLineCount = model.getLineCount()
+      }
+    }
+    catch { }
   }
 }

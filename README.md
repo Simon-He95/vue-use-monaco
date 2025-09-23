@@ -152,6 +152,9 @@ const {
     horizontalScrollbarSize: 10,
     alwaysConsumeMouseWheel: false,
   },
+  // 当使用流式追加（append）或频繁更新时，可通过 revealDebounceMs 合并多次自动滚动请求
+  // 默认值：75（毫秒）。设置为 0 可关闭合并逻辑（立即 reveal）。增大到 150+ 可进一步减少滚动频率。
+  revealDebounceMs: 75,
 })
 
 onMounted(async () => {
@@ -319,6 +322,27 @@ function pushModifiedChunk(chunk: string) {
 ```
 
 ### 流式追加 + 语言切换（快速示例）
+
+### 自动滚动配置说明
+
+下面是与自动滚动行为相关的可配置项及推荐值：
+
+- `revealDebounceMs` (number, ms)
+  - 说明：在流式追加或短时间内多次更新时，会把多次 reveal 请求合并成一次。减少滚动频率与抖动。
+  - 默认：75
+  - 建议：流式输出时保留 50-150，静态或实时编辑可设为 0 以禁用合并。
+
+- `revealBatchOnIdleMs` (number | undefined)
+  - 说明：如果设置为正数（例如 200），系统会在最后一次追加后等待该毫秒数再执行一次“最终”滚动。这适合大量小片段追加后一次性滚动到底部。
+  - 默认：undefined（禁用）
+
+- `revealStrategy` ("bottom" | "centerIfOutside" | "center")
+  - 说明：控制使用哪种 reveal API。
+    - `bottom`：使用 `revealLine`（靠近底部，变化明显）
+    - `centerIfOutside`：使用 `revealLineInCenterIfOutsideViewport`（默认，更温和，只在目标不在视口内时居中）
+    - `center`：使用 `revealLineInCenter`（总是居中）
+
+这些选项已添加到 `useMonaco()` 的配置中，并可通过 TypeScript 的 `RevealStrategy` 枚举（库导出）进行引用。
 
 ```vue
 <script setup lang="ts">
