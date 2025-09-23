@@ -157,7 +157,6 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
   // - 当用户向上滚动离开底部时，暂停 revealLine 的自动滚动
   // - 当用户再次滚动回接近底部（阈值：两行高或 32px）时，恢复自动滚动
   let shouldAutoScroll = true
-  let scrollWatcher: monaco.IDisposable | null = null
   // cached computed height (min(lineCount*lineHeight + padding, maxHeightValue))
   // make mutable so it can be updated when layout/content changes
   const cachedComputedHeight: number | null = null
@@ -275,16 +274,10 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
       const model = editorView!.getModel()
       const line = targetLine ?? model?.getLineCount() ?? 1
 
-      try {
-        if (revealDebounceId != null) {
-          try {
-            clearTimeout(revealDebounceId)
-          }
-          catch { }
-          revealDebounceId = null
-        }
+      if (revealDebounceId != null) {
+        clearTimeout(revealDebounceId)
+        revealDebounceId = null
       }
-      catch { }
       revealDebounceId = (setTimeout(() => {
         revealDebounceId = null
         rafScheduler.schedule('reveal', () => {
@@ -323,11 +316,6 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
       const ds = monacoOptions.onBeforeCreate(monaco)
       if (ds)
         disposals.push(...ds)
-    }
-
-    if (themeWatcher) {
-      themeWatcher()
-      themeWatcher = null
     }
 
     await setThemeRegisterPromise(registerMonacoThemes(themes, languages))
@@ -400,11 +388,6 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
       const ds = monacoOptions.onBeforeCreate(monaco)
       if (ds)
         disposals.push(...ds)
-    }
-
-    if (themeWatcher) {
-      themeWatcher()
-      themeWatcher = null
     }
 
     await setThemeRegisterPromise(registerMonacoThemes(themes, languages))
@@ -481,8 +464,14 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     rafScheduler.cancel('append')
     appendBufferScheduled = false
     appendBuffer.length = 0
-    if (editorView) {
-      editorView.dispose()
+    // If an EditorManager was active it already disposed the editor instance.
+    // Only dispose the module-level editorView when there is no editorMgr to avoid
+    // double-dispose races (which can throw in some Monaco builds).
+    if (!editorMgr && editorView) {
+      try {
+        editorView.dispose()
+      }
+      catch { }
       editorView = null
     }
     lastKnownCode = null
@@ -493,13 +482,6 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     if (themeWatcher) {
       themeWatcher()
       themeWatcher = null
-    }
-    if (scrollWatcher) {
-      try {
-        scrollWatcher.dispose()
-      }
-      catch { }
-      scrollWatcher = null
     }
 
     // height managers are managed by the respective managers
@@ -738,14 +720,6 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
           diffMgr.safeClean()
         }
         catch { }
-      }
-      // dispose scroll watchers but keep theme watcher (safeClean is temporary)
-      if (scrollWatcher) {
-        try {
-          scrollWatcher.dispose()
-        }
-        catch { }
-        scrollWatcher = null
       }
       // reset transient scroll-related state so next stream starts clean
       _hasScrollBar = false
