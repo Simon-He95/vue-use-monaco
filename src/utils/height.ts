@@ -23,10 +23,7 @@ export function createHeightManager(container: HTMLElement, computeNext: () => n
   }
   function dispose() {
     if (raf != null) {
-      try {
-        cancelAnimationFrame(raf)
-      }
-      catch { }
+      cancelAnimationFrame(raf)
       raf = null
     }
   }

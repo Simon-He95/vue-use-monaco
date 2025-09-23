@@ -75,22 +75,17 @@ export class DiffEditorManager {
   private computedHeight(): number {
     if (!this.diffEditorView)
       return Math.min(1 * 18 + padding, this.maxHeightValue)
-    try {
-      const modifiedEditor = this.diffEditorView.getModifiedEditor()
-      const originalEditor = this.diffEditorView.getOriginalEditor()
-      const lineHeight = modifiedEditor.getOption(monaco.editor.EditorOption.lineHeight)
-      const oCount = originalEditor.getModel()?.getLineCount() ?? 1
-      const mCount = modifiedEditor.getModel()?.getLineCount() ?? 1
-      const lineCount = Math.max(oCount, mCount)
-      const fromLines = lineCount * lineHeight + padding
-      // prefer rendered scrollHeight when available (covers view zones, inline diffs, wrapping)
-      const scrollH = Math.max(originalEditor.getScrollHeight?.() ?? 0, modifiedEditor.getScrollHeight?.() ?? 0)
-      const desired = Math.max(fromLines, scrollH)
-      return Math.min(desired, this.maxHeightValue)
-    }
-    catch {
-      return Math.min(1 * 18 + padding, this.maxHeightValue)
-    }
+    const modifiedEditor = this.diffEditorView.getModifiedEditor()
+    const originalEditor = this.diffEditorView.getOriginalEditor()
+    const lineHeight = modifiedEditor.getOption(monaco.editor.EditorOption.lineHeight)
+    const oCount = originalEditor.getModel()?.getLineCount() ?? 1
+    const mCount = modifiedEditor.getModel()?.getLineCount() ?? 1
+    const lineCount = Math.max(oCount, mCount)
+    const fromLines = lineCount * lineHeight + padding
+    // prefer rendered scrollHeight when available (covers view zones, inline diffs, wrapping)
+    const scrollH = Math.max(originalEditor.getScrollHeight?.() ?? 0, modifiedEditor.getScrollHeight?.() ?? 0)
+    const desired = Math.max(fromLines, scrollH)
+    return Math.min(desired, this.maxHeightValue)
   }
 
   private hasVerticalScrollbarModified(): boolean {
@@ -170,37 +165,34 @@ export class DiffEditorManager {
 
   private performRevealDiff(line: number) {
     this.rafScheduler.schedule('revealDiff', () => {
+      const strategy = this.revealStrategyOption ?? this.options.revealStrategy ?? 'centerIfOutside'
+      const ScrollType: any = (monaco as any).ScrollType || (monaco as any).editor?.ScrollType
+      const smooth = (ScrollType && typeof ScrollType.Smooth !== 'undefined') ? ScrollType.Smooth : undefined
       try {
-        const strategy = this.revealStrategyOption ?? this.options.revealStrategy ?? 'centerIfOutside'
-        const ScrollType: any = (monaco as any).ScrollType || (monaco as any).editor?.ScrollType
-        const smooth = (ScrollType && typeof ScrollType.Smooth !== 'undefined') ? ScrollType.Smooth : undefined
-        try {
-          const me = this.diffEditorView!.getModifiedEditor()
-          if (strategy === 'bottom') {
-            if (typeof smooth !== 'undefined')
-              me.revealLine(line, smooth)
-            else me.revealLine(line)
-          }
-          else if (strategy === 'center') {
-            if (typeof smooth !== 'undefined')
-              me.revealLineInCenter(line, smooth)
-            else me.revealLineInCenter(line)
-          }
-          else {
-            if (typeof smooth !== 'undefined')
-              me.revealLineInCenterIfOutsideViewport(line, smooth)
-            else me.revealLineInCenterIfOutsideViewport(line)
-          }
+        const me = this.diffEditorView!.getModifiedEditor()
+        if (strategy === 'bottom') {
+          if (typeof smooth !== 'undefined')
+            me.revealLine(line, smooth)
+          else me.revealLine(line)
         }
-        catch {
-          try {
-            this.diffEditorView!.getModifiedEditor().revealLine(line)
-          }
-          catch { }
+        else if (strategy === 'center') {
+          if (typeof smooth !== 'undefined')
+            me.revealLineInCenter(line, smooth)
+          else me.revealLineInCenter(line)
         }
-        this.lastRevealLineDiff = line
+        else {
+          if (typeof smooth !== 'undefined')
+            me.revealLineInCenterIfOutsideViewport(line, smooth)
+          else me.revealLineInCenterIfOutsideViewport(line)
+        }
       }
-      catch { }
+      catch {
+        try {
+          this.diffEditorView!.getModifiedEditor().revealLine(line)
+        }
+        catch { }
+      }
+      this.lastRevealLineDiff = line
     })
   }
 
@@ -245,10 +237,7 @@ export class DiffEditorManager {
 
     this.shouldAutoScrollDiff = !!(this.autoScrollInitial && this.diffAutoScroll)
     if (this.diffScrollWatcher) {
-      try {
-        this.diffScrollWatcher.dispose()
-      }
-      catch { }
+      this.diffScrollWatcher.dispose()
       this.diffScrollWatcher = null
     }
     if (this.diffAutoScroll) {
@@ -268,22 +257,16 @@ export class DiffEditorManager {
     this.maybeScrollDiffToBottom(this.modifiedModel.getLineCount(), this.lastKnownModifiedLineCount ?? undefined)
 
     if (this.diffHeightManager) {
-      try {
-        this.diffHeightManager.dispose()
-      }
-      catch { }
+      this.diffHeightManager.dispose()
       this.diffHeightManager = null
     }
     this.diffHeightManager = createHeightManager(container, () => this.computedHeight())
     this.diffHeightManager.update()
 
-    try {
-      const me = this.diffEditorView.getModifiedEditor()
-      this.cachedScrollHeightDiff = me.getScrollHeight?.() ?? null
-      this.cachedLineHeightDiff = me.getOption?.(monaco.editor.EditorOption.lineHeight) ?? null
-      this.cachedComputedHeightDiff = this.computedHeight()
-    }
-    catch { }
+    const me = this.diffEditorView.getModifiedEditor()
+    this.cachedScrollHeightDiff = me.getScrollHeight?.() ?? null
+    this.cachedLineHeightDiff = me.getOption?.(monaco.editor.EditorOption.lineHeight) ?? null
+    this.cachedComputedHeightDiff = this.computedHeight()
 
     const oEditor = this.diffEditorView.getOriginalEditor()
     const mEditor = this.diffEditorView.getModifiedEditor()
@@ -459,40 +442,25 @@ export class DiffEditorManager {
     this.appendBufferDiff.length = 0
 
     if (this.diffScrollWatcher) {
-      try {
-        this.diffScrollWatcher.dispose()
-      }
-      catch { }
+      this.diffScrollWatcher.dispose()
       this.diffScrollWatcher = null
     }
 
     if (this.diffHeightManager) {
-      try {
-        this.diffHeightManager.dispose()
-      }
-      catch { }
+      this.diffHeightManager.dispose()
       this.diffHeightManager = null
     }
 
     if (this.diffEditorView) {
-      try {
-        this.diffEditorView.dispose()
-      }
-      catch { }
+      this.diffEditorView.dispose()
       this.diffEditorView = null
     }
     if (this.originalModel) {
-      try {
-        this.originalModel.dispose()
-      }
-      catch { }
+      this.originalModel.dispose()
       this.originalModel = null
     }
     if (this.modifiedModel) {
-      try {
-        this.modifiedModel.dispose()
-      }
-      catch { }
+      this.modifiedModel.dispose()
       this.modifiedModel = null
     }
 
@@ -515,10 +483,7 @@ export class DiffEditorManager {
     this.pendingDiffUpdate = null
 
     if (this.diffScrollWatcher) {
-      try {
-        this.diffScrollWatcher.dispose()
-      }
-      catch { }
+      this.diffScrollWatcher.dispose()
       this.diffScrollWatcher = null
     }
 
@@ -527,10 +492,7 @@ export class DiffEditorManager {
     this.lastScrollTopDiff = 0
 
     if (this.diffHeightManager) {
-      try {
-        this.diffHeightManager.dispose()
-      }
-      catch { }
+      this.diffHeightManager.dispose()
       this.diffHeightManager = null
     }
     if (this.revealDebounceIdDiff != null) {

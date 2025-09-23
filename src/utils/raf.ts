@@ -14,10 +14,7 @@ export function createRafScheduler() {
 function schedule(kind: string, cb: FrameRequestCallback) {
   const existing = ids[kind]
   if (existing != null) {
-    try {
-      ts.cancelAnimationFrame(existing)
-    }
-    catch { }
+    ts.cancelAnimationFrame(existing)
   }
   ids[kind] = ts.requestAnimationFrame((t) => {
     ids[kind] = null
@@ -27,10 +24,7 @@ function schedule(kind: string, cb: FrameRequestCallback) {
 function cancel(kind: string) {
   const id = ids[kind]
   if (id != null) {
-    try {
-      ts.cancelAnimationFrame(id)
-    }
-    catch { }
+    ts.cancelAnimationFrame(id)
     ids[kind] = null
   }
 }

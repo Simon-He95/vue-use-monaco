@@ -67,36 +67,26 @@ export class EditorManager {
   ) { }
 
   private hasVerticalScrollbar(): boolean {
-    try {
-      if (!this.editorView)
-        return false
-      if (this._hasScrollBar)
-        return true
-      const m = this.measureViewport()
-      if (!m)
-        return false
-      return this._hasScrollBar = (m.scrollHeight > m.computedHeight + padding / 2)
-    }
-    catch {
+    if (!this.editorView)
       return false
-    }
+    if (this._hasScrollBar)
+      return true
+    const m = this.measureViewport()
+    if (!m)
+      return false
+    return this._hasScrollBar = (m.scrollHeight > m.computedHeight + padding / 2)
   }
 
   private userIsNearBottom(): boolean {
-    try {
-      if (!this.editorView)
-        return true
-      const m = this.measureViewport()
-      if (!m || !m.li)
-        return true
-      const lineThreshold = (this.autoScrollThresholdLines ?? 0) * m.lineHeight
-      const threshold = Math.max(lineThreshold || 0, this.autoScrollThresholdPx || 0)
-      const distance = m.scrollHeight - (m.scrollTop + m.li.height)
-      return distance <= threshold
-    }
-    catch {
+    if (!this.editorView)
       return true
-    }
+    const m = this.measureViewport()
+    if (!m || !m.li)
+      return true
+    const lineThreshold = (this.autoScrollThresholdLines ?? 0) * m.lineHeight
+    const threshold = Math.max(lineThreshold || 0, this.autoScrollThresholdPx || 0)
+    const distance = m.scrollHeight - (m.scrollTop + m.li.height)
+    return distance <= threshold
   }
 
   private computedHeight(editorView: monaco.editor.IStandaloneCodeEditor) {
@@ -110,75 +100,71 @@ export class EditorManager {
     // Defer measurement and reveal work to the raf scheduler so we avoid forcing sync layout
     // during hot update paths. This coalesces multiple calls into one frame.
     this.rafScheduler.schedule('maybe-scroll', () => {
-      try {
-        if (!(this.autoScrollOnUpdate && this.shouldAutoScroll && this.hasVerticalScrollbar()))
-          return
-        const model = this.editorView!.getModel()
-        const line = targetLine ?? model?.getLineCount() ?? 1
-        // if revealBatchOnIdleMs is provided, use idle-batching: delay final reveal until idle
-        const batchMs = this.revealBatchOnIdleMsOption ?? this.options.revealBatchOnIdleMs
-        if (typeof batchMs === 'number' && batchMs > 0) {
-          if (this.revealIdleTimerId != null) {
-            clearTimeout(this.revealIdleTimerId)
-          }
-          this.revealIdleTimerId = (setTimeout(() => {
-            this.revealIdleTimerId = null
-            this.performReveal(line)
-          }, batchMs) as unknown) as number
-          return
-        }
-
-        // otherwise use debounce behavior
-        if (this.revealDebounceId != null) {
-          clearTimeout(this.revealDebounceId)
-          this.revealDebounceId = null
-        }
-        const ms = (typeof this.revealDebounceMs === 'number' && this.revealDebounceMs > 0)
-          ? this.revealDebounceMs
-          : (typeof this.revealDebounceMsOption === 'number' && this.revealDebounceMsOption > 0)
-              ? this.revealDebounceMsOption
-              : this.revealDebounceMs
-        this.revealDebounceId = (setTimeout(() => {
-          this.revealDebounceId = null
-          this.performReveal(line)
-        }, ms) as unknown) as number
+      if (!(this.autoScrollOnUpdate && this.shouldAutoScroll && this.hasVerticalScrollbar())) {
+        return
       }
-      catch { }
+
+      const model = this.editorView!.getModel()
+      const line = targetLine ?? model?.getLineCount() ?? 1
+      // if revealBatchOnIdleMs is provided, use idle-batching: delay final reveal until idle
+      const batchMs = this.revealBatchOnIdleMsOption ?? this.options.revealBatchOnIdleMs
+      if (typeof batchMs === 'number' && batchMs > 0) {
+        if (this.revealIdleTimerId != null) {
+          clearTimeout(this.revealIdleTimerId)
+        }
+        this.revealIdleTimerId = (setTimeout(() => {
+          this.revealIdleTimerId = null
+          this.performReveal(line)
+        }, batchMs) as unknown) as number
+        return
+      }
+
+      // otherwise use debounce behavior
+      if (this.revealDebounceId != null) {
+        clearTimeout(this.revealDebounceId)
+        this.revealDebounceId = null
+      }
+      const ms = (typeof this.revealDebounceMs === 'number' && this.revealDebounceMs > 0)
+        ? this.revealDebounceMs
+        : (typeof this.revealDebounceMsOption === 'number' && this.revealDebounceMsOption > 0)
+            ? this.revealDebounceMsOption
+            : this.revealDebounceMs
+      this.revealDebounceId = (setTimeout(() => {
+        this.revealDebounceId = null
+        this.performReveal(line)
+      }, ms) as unknown) as number
     })
   }
 
   private performReveal(line: number) {
     this.rafScheduler.schedule('reveal', () => {
+      const strategy = this.revealStrategyOption ?? this.options.revealStrategy ?? 'centerIfOutside'
+      const ScrollType: any = (monaco as any).ScrollType || (monaco as any).editor?.ScrollType
+      const smooth = (ScrollType && typeof ScrollType.Smooth !== 'undefined') ? ScrollType.Smooth : undefined
       try {
-        const strategy = this.revealStrategyOption ?? this.options.revealStrategy ?? 'centerIfOutside'
-        const ScrollType: any = (monaco as any).ScrollType || (monaco as any).editor?.ScrollType
-        const smooth = (ScrollType && typeof ScrollType.Smooth !== 'undefined') ? ScrollType.Smooth : undefined
-        try {
-          if (strategy === 'bottom') {
-            if (typeof smooth !== 'undefined')
-              this.editorView!.revealLine(line, smooth)
-            else this.editorView!.revealLine(line)
-          }
-          else if (strategy === 'center') {
-            if (typeof smooth !== 'undefined')
-              this.editorView!.revealLineInCenter(line, smooth)
-            else this.editorView!.revealLineInCenter(line)
-          }
-          else {
-            if (typeof smooth !== 'undefined')
-              this.editorView!.revealLineInCenterIfOutsideViewport(line, smooth)
-            else this.editorView!.revealLineInCenterIfOutsideViewport(line)
-          }
+        if (strategy === 'bottom') {
+          if (typeof smooth !== 'undefined')
+            this.editorView!.revealLine(line, smooth)
+          else this.editorView!.revealLine(line)
         }
-        catch {
-          // fallback to simple revealLine
-          try {
-            this.editorView!.revealLine(line)
-          }
-          catch { }
+        else if (strategy === 'center') {
+          if (typeof smooth !== 'undefined')
+            this.editorView!.revealLineInCenter(line, smooth)
+          else this.editorView!.revealLineInCenter(line)
+        }
+        else {
+          if (typeof smooth !== 'undefined')
+            this.editorView!.revealLineInCenterIfOutsideViewport(line, smooth)
+          else this.editorView!.revealLineInCenterIfOutsideViewport(line)
         }
       }
-      catch { }
+      catch {
+        // fallback to simple revealLine
+        try {
+          this.editorView!.revealLine(line)
+        }
+        catch { }
+      }
     })
   }
 
@@ -232,13 +218,10 @@ export class EditorManager {
     this.editorHeightManager = createHeightManager(container, () => this.computedHeight(this.editorView!))
     this.editorHeightManager.update()
 
-    try {
-      this.cachedScrollHeight = this.editorView.getScrollHeight?.() ?? null
-      this.cachedLineHeight = this.editorView.getOption?.(monaco.editor.EditorOption.lineHeight) ?? null
-      this.cachedComputedHeight = this.computedHeight(this.editorView)
-      this.cachedLineCount = this.editorView.getModel()?.getLineCount() ?? null
-    }
-    catch { }
+    this.cachedScrollHeight = this.editorView.getScrollHeight?.() ?? null
+    this.cachedLineHeight = this.editorView.getOption?.(monaco.editor.EditorOption.lineHeight) ?? null
+    this.cachedComputedHeight = this.computedHeight(this.editorView)
+    this.cachedLineCount = this.editorView.getModel()?.getLineCount() ?? null
 
     this.editorView.onDidContentSizeChange?.(() => {
       this._hasScrollBar = false
@@ -257,10 +240,7 @@ export class EditorManager {
 
     this.shouldAutoScroll = !!this.autoScrollInitial
     if (this.scrollWatcher) {
-      try {
-        this.scrollWatcher.dispose()
-      }
-      catch { }
+      this.scrollWatcher.dispose()
       this.scrollWatcher = null
     }
     this.scrollWatcher = createScrollWatcherForEditor(this.editorView, {
@@ -268,10 +248,7 @@ export class EditorManager {
       onMaybeResume: () => {
         // defer the expensive userIsNearBottom check to the raf scheduler
         this.rafScheduler.schedule('maybe-resume', () => {
-          try {
-            this.shouldAutoScroll = this.userIsNearBottom()
-          }
-          catch { }
+          this.shouldAutoScroll = this.userIsNearBottom()
         })
       },
       getLast: () => this.lastScrollTop,
@@ -413,27 +390,24 @@ export class EditorManager {
     }
     const text = this.appendBuffer.join('')
     this.appendBuffer.length = 0
-    try {
-      const lastLine = model.getLineCount()
-      const lastColumn = model.getLineMaxColumn(lastLine)
-      const range = new monaco.Range(lastLine, lastColumn, lastLine, lastColumn)
-      const isReadOnly = this.editorView.getOption(monaco.editor.EditorOption.readOnly)
-      if (isReadOnly) {
-        model.applyEdits([{ range, text, forceMoveMarkers: true }])
-      }
-      else {
-        this.editorView.executeEdits('append', [{ range, text, forceMoveMarkers: true }])
-      }
-      if (this.lastKnownCode != null) {
-        this.lastKnownCode = this.lastKnownCode + text
-      }
-      const newLineCount = model.getLineCount()
-      if (lastLine !== newLineCount) {
-        this.cachedLineCount = newLineCount
-        this.maybeScrollToBottom(newLineCount)
-      }
+    const lastLine = model.getLineCount()
+    const lastColumn = model.getLineMaxColumn(lastLine)
+    const range = new monaco.Range(lastLine, lastColumn, lastLine, lastColumn)
+    const isReadOnly = this.editorView.getOption(monaco.editor.EditorOption.readOnly)
+    if (isReadOnly) {
+      model.applyEdits([{ range, text, forceMoveMarkers: true }])
     }
-    catch { }
+    else {
+      this.editorView.executeEdits('append', [{ range, text, forceMoveMarkers: true }])
+    }
+    if (this.lastKnownCode != null) {
+      this.lastKnownCode = this.lastKnownCode + text
+    }
+    const newLineCount = model.getLineCount()
+    if (lastLine !== newLineCount) {
+      this.cachedLineCount = newLineCount
+      this.maybeScrollToBottom(newLineCount)
+    }
   }
 
   setLanguage(language: MonacoLanguage, languages: MonacoLanguage[]) {
@@ -461,10 +435,7 @@ export class EditorManager {
     this.appendBuffer.length = 0
 
     if (this.editorView) {
-      try {
-        this.editorView.dispose()
-      }
-      catch { }
+      this.editorView.dispose()
       this.editorView = null
     }
     this.lastKnownCode = null
@@ -473,17 +444,11 @@ export class EditorManager {
       this.lastContainer = null
     }
     if (this.scrollWatcher) {
-      try {
-        this.scrollWatcher.dispose()
-      }
-      catch { }
+      this.scrollWatcher.dispose()
       this.scrollWatcher = null
     }
     if (this.editorHeightManager) {
-      try {
-        this.editorHeightManager.dispose()
-      }
-      catch { }
+      this.editorHeightManager.dispose()
       this.editorHeightManager = null
     }
   }
@@ -493,10 +458,7 @@ export class EditorManager {
     this.pendingUpdate = null
 
     if (this.scrollWatcher) {
-      try {
-        this.scrollWatcher.dispose()
-      }
-      catch { }
+      this.scrollWatcher.dispose()
       this.scrollWatcher = null
     }
     if (this.revealDebounceId != null) {
@@ -509,10 +471,7 @@ export class EditorManager {
     this.lastScrollTop = 0
 
     if (this.editorHeightManager) {
-      try {
-        this.editorHeightManager.dispose()
-      }
-      catch { }
+      this.editorHeightManager.dispose()
       this.editorHeightManager = null
     }
   }

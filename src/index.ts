@@ -191,12 +191,9 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
       return
     }
 
-    try {
-      await setThemeRegisterPromise(registerMonacoThemes(themes, languages))
-    }
-    catch {
-      // ignore registration errors; we'll still attempt to set the theme
-    }
+    const _p = setThemeRegisterPromise(registerMonacoThemes(themes, languages))
+    if (_p)
+      await _p.catch(() => undefined)
 
     const availableNames = themes.map(t => (typeof t === 'string' ? t : (t as any).name))
     if (!availableNames.includes(themeName)) {
@@ -226,10 +223,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
         monaco.editor.setTheme(themeName)
         lastAppliedTheme = themeName
         if (maybeHighlighter && typeof maybeHighlighter.setTheme === 'function') {
-          try {
-            await maybeHighlighter.setTheme(themeName)
-          }
-          catch { }
+          await maybeHighlighter.setTheme(themeName).catch(() => undefined)
         }
       }
       catch (err2) {
@@ -253,17 +247,12 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
 
   // 检查是否出现垂直滚动条
   function hasVerticalScrollbar(): boolean {
-    try {
-      if (!editorView)
-        return false
-      if (_hasScrollBar)
-        return true
-      const ch = cachedComputedHeight ?? computedHeight(editorView)
-      return _hasScrollBar = (editorView.getScrollHeight!() > ch + padding / 2)
-    }
-    catch {
+    if (!editorView)
       return false
-    }
+    if (_hasScrollBar)
+      return true
+    const ch = cachedComputedHeight ?? computedHeight(editorView)
+    return _hasScrollBar = (editorView.getScrollHeight!() > ch + padding / 2)
   }
   // 在满足条件时滚动到底部，否则尊重用户滚动状态
   // debounce id for reveal (module-scope for top-level helper)
@@ -282,18 +271,15 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
         revealDebounceId = null
         rafScheduler.schedule('reveal', () => {
           try {
-            try {
-              const ScrollType: any = (monaco as any).ScrollType || (monaco as any).editor?.ScrollType
-              if (ScrollType && typeof ScrollType.Smooth !== 'undefined')
-                editorView!.revealLineInCenterIfOutsideViewport(line, ScrollType.Smooth)
-              else
-                editorView!.revealLineInCenterIfOutsideViewport(line)
-            }
-            catch {
+            const ScrollType: any = (monaco as any).ScrollType || (monaco as any).editor?.ScrollType
+            if (ScrollType && typeof ScrollType.Smooth !== 'undefined')
+              editorView!.revealLineInCenterIfOutsideViewport(line, ScrollType.Smooth)
+            else
               editorView!.revealLineInCenterIfOutsideViewport(line)
-            }
           }
-          catch { }
+          catch {
+            // ignore reveal errors
+          }
         })
       }, revealDebounceMs) as unknown) as number
     }
@@ -444,17 +430,11 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
   // Ensure cleanup stops the watcher
   function cleanupEditor() {
     if (editorMgr) {
-      try {
-        editorMgr.cleanup()
-      }
-      catch { }
+      editorMgr.cleanup()
       editorMgr = null
     }
     if (diffMgr) {
-      try {
-        diffMgr.cleanup()
-      }
-      catch { }
+      diffMgr.cleanup()
       diffMgr = null
     }
     // cancel rafs and pending updates
@@ -468,10 +448,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}) {
     // Only dispose the module-level editorView when there is no editorMgr to avoid
     // double-dispose races (which can throw in some Monaco builds).
     if (!editorMgr && editorView) {
-      try {
-        editorView.dispose()
-      }
-      catch { }
+      editorView.dispose()
       editorView = null
     }
     lastKnownCode = null
