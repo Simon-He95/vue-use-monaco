@@ -9,15 +9,21 @@ vi.mock('../src/monaco-shim', () => {
       public endColumn: number,
     ) {}
   }
+  const editor = {
+    EditorOption: { lineHeight: 'lineHeight' },
+    colorize: vi.fn(async (text: string, language: string) =>
+      `<span class="mtk1" data-lang="${language}">${text}</span>`),
+  }
 
   return {
-    default: { editor: { EditorOption: { lineHeight: 'lineHeight' } }, Range },
-    editor: { EditorOption: { lineHeight: 'lineHeight' } },
+    default: { editor, Range },
+    editor,
     Range,
   }
 })
 
 import { DiffEditorManager } from '../src/core/DiffEditorManager'
+import * as monaco from '../src/monaco-shim'
 
 function createClassList() {
   const classes = new Set<string>()
@@ -699,12 +705,17 @@ describe('DiffEditorManager diff presentation', () => {
     }
   })
 
-  it('reuses native inline delete wrappers instead of adding another fallback zone', () => {
+  it('reuses native inline delete wrappers instead of adding another fallback zone', async () => {
     class FakeElement {
       className = ''
       style: Record<string, string> = {}
       children: any[] = []
       attributes = new Map<string, string>()
+      dataset: Record<string, string> = {}
+      innerHTML = ''
+      isConnected = true
+      parentElement: FakeElement | null = null
+      textContent = ''
 
       constructor(
         private readonly selectorMap: Record<string, unknown> = {},
@@ -717,10 +728,13 @@ describe('DiffEditorManager diff presentation', () => {
       append(node: any) {
         this.children.push(node)
         node.parentElement = this
+        node.isConnected = true
       }
 
       removeChild(node: any) {
         this.children = this.children.filter(child => child !== node)
+        node.parentElement = null
+        node.isConnected = false
       }
 
       setAttribute(name: string, value: string) {
@@ -742,6 +756,7 @@ describe('DiffEditorManager diff presentation', () => {
     }
 
     try {
+      ;(monaco.editor.colorize as any).mockClear?.()
       const { manager } = createPresentationHarness(true)
       const applyFontInfo = vi.fn()
       const nativeDeleteMarker = new FakeElement()
@@ -780,6 +795,8 @@ describe('DiffEditorManager diff presentation', () => {
       }
       ;(manager as any).originalModel = {
         getLineContent: () => '"version": "0.0.49",',
+        getLanguageId: () => 'yaml',
+        getOptions: () => ({ tabSize: 2 }),
       }
       ;(manager as any).isDiffInlineMode = () => true
 
@@ -797,6 +814,14 @@ describe('DiffEditorManager diff presentation', () => {
       expect(viewWrapper.children[0].className).toBe(
         'stream-monaco-fallback-inline-delete-zone',
       )
+      await Promise.resolve()
+      const lineNode = viewWrapper.children[0].children[0]
+      expect(monaco.editor.colorize).toHaveBeenCalledWith(
+        '"version": "0.0.49",',
+        'yaml',
+        { tabSize: 2 },
+      )
+      expect(lineNode.innerHTML).toContain('class="mtk1"')
       expect(marginWrapper.children).toHaveLength(1)
       expect(marginWrapper.children[0].className).toBe(
         'stream-monaco-fallback-inline-delete-margin',

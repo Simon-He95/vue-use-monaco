@@ -719,6 +719,41 @@ export class DiffEditorManager {
     return model.getValue().split(/\r?\n/)[lineNumber - 1] ?? ''
   }
 
+  private colorizeFallbackInlineDeletedLine(
+    lineNode: HTMLElement,
+    model: monaco.editor.ITextModel,
+    lineText: string,
+    tabSize: number | undefined,
+  ) {
+    const language = model.getLanguageId?.()
+    const colorize = (monaco.editor as typeof monaco.editor & {
+      colorize?: (
+        text: string,
+        languageId: string,
+        options: monaco.editor.IColorizerOptions,
+      ) => Promise<string>
+    }).colorize
+    if (!language || typeof colorize !== 'function')
+      return
+
+    const signature = `${language}:${lineText}`
+    lineNode.dataset.streamMonacoColorizeSignature = signature
+    void colorize(lineText, language, { tabSize })
+      .then((html) => {
+        if (lineNode.dataset.streamMonacoColorizeSignature !== signature)
+          return
+        lineNode.innerHTML = html
+      })
+      .catch(() => {})
+  }
+
+  private getModelTabSize(model: monaco.editor.ITextModel) {
+    const tabSize = model.getOptions?.().tabSize
+    return typeof tabSize === 'number' && Number.isFinite(tabSize)
+      ? tabSize
+      : undefined
+  }
+
   private hasVisibleNativeInlineDeleteNodes() {
     if (!this.lastContainer)
       return false
@@ -813,6 +848,7 @@ export class DiffEditorManager {
       }
     }).EditorOption?.lineHeight
     const lineHeight = modifiedEditor.getOption?.(lineHeightOption as any) ?? 20
+    const originalTabSize = this.getModelTabSize(originalModel)
     const relevantChanges = lineChanges.filter(change => hasOriginalLines(change))
     const nativeViewWrappers = Array.from(
       this.lastContainer?.querySelectorAll?.(
@@ -907,12 +943,19 @@ export class DiffEditorManager {
         modifiedEditor.applyFontInfo?.(domNode)
 
         for (let line = change.originalStartLineNumber; line <= change.originalEndLineNumber; line++) {
+          const lineText = this.readModelLineContent(originalModel, line)
           const lineNode = document.createElement('div')
           lineNode.className = 'stream-monaco-fallback-inline-delete-line'
-          lineNode.textContent = this.readModelLineContent(originalModel, line)
+          lineNode.textContent = lineText
           lineNode.style.height = `${lineHeight}px`
           lineNode.style.lineHeight = `${lineHeight}px`
           domNode.append(lineNode)
+          this.colorizeFallbackInlineDeletedLine(
+            lineNode,
+            originalModel,
+            lineText,
+            originalTabSize,
+          )
         }
 
         pair.viewWrapper.append(domNode)
@@ -946,12 +989,19 @@ export class DiffEditorManager {
         modifiedEditor.applyFontInfo?.(domNode)
 
         for (let line = change.originalStartLineNumber; line <= change.originalEndLineNumber; line++) {
+          const lineText = this.readModelLineContent(originalModel, line)
           const lineNode = document.createElement('div')
           lineNode.className = 'stream-monaco-fallback-inline-delete-line'
-          lineNode.textContent = this.readModelLineContent(originalModel, line)
+          lineNode.textContent = lineText
           lineNode.style.height = `${lineHeight}px`
           lineNode.style.lineHeight = `${lineHeight}px`
           domNode.append(lineNode)
+          this.colorizeFallbackInlineDeletedLine(
+            lineNode,
+            originalModel,
+            lineText,
+            originalTabSize,
+          )
         }
 
         const marginDomNode = document.createElement('div')
