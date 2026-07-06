@@ -604,7 +604,7 @@ export class DiffEditorManager {
     const lineRects = (selector: string) =>
       Array.from(this.lastContainer!.querySelectorAll?.(selector) ?? [])
         .filter((node): node is HTMLElement => node instanceof HTMLElement)
-        .map((node) => node.getBoundingClientRect())
+        .map(node => node.getBoundingClientRect())
         .filter(rect => rect.width > 0 && rect.height > 0)
 
     const insertLines = lineRects('.monaco-editor .line-insert, .monaco-diff-editor .line-insert')
