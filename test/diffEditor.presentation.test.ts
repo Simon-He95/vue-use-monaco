@@ -136,6 +136,136 @@ function createPresentationHarness(
 }
 
 describe('DiffEditorManager diff presentation', () => {
+  it('keeps changed-line backgrounds square while preserving inline diff token radius', () => {
+    const appendedStyles: Array<{ id: string, textContent: string }> = []
+    const originalDocument = (globalThis as any).document
+    ;(globalThis as any).document = {
+      getElementById: () => null,
+      createElement: () => ({ id: '', textContent: '' }),
+      head: {
+        append(style: { id: string, textContent: string }) {
+          appendedStyles.push(style)
+        },
+      },
+    }
+
+    try {
+      const manager = new DiffEditorManager(
+        { readOnly: true } as any,
+        600,
+        '600px',
+        true,
+        true,
+        32,
+        2,
+        true,
+        75,
+      )
+
+      ;(manager as any).ensureDiffUiStyle()
+
+      const css = appendedStyles[0]?.textContent ?? ''
+      expect(css).toContain('--stream-monaco-diff-code-gap: 2px;')
+      expect(css).toContain('--stream-monaco-diff-code-padding: 6px;')
+      expect(css).toMatch(
+        /\.line-insert \{\n  background: var\(--stream-monaco-added-line-fill\) !important;\n  border: 0 !important;\n  border-radius: 0 !important;/,
+      )
+      expect(css).toMatch(
+        /\.line-delete \{\n  background: var\(--stream-monaco-removed-line-fill\) !important;\n  border: 0 !important;\n  border-radius: 0 !important;/,
+      )
+      expect(css).toMatch(
+        /\.stream-monaco-fallback-line-insert \{\n  background: var\(--stream-monaco-added-line-fill\) !important;\n  border: 0 !important;\n  border-radius: 0 !important;/,
+      )
+      expect(css).toMatch(
+        /\.stream-monaco-fallback-inline-delete-line \{[\s\S]*border-radius: 0;\n  box-shadow: var\(--stream-monaco-removed-line-shadow\);/,
+      )
+      expect(css).toContain('padding-left: calc(var(--stream-monaco-diff-code-gap) + var(--stream-monaco-diff-code-padding)) !important;')
+      expect(css).toContain('margin-left: var(--stream-monaco-diff-code-gap) !important;')
+      expect(css).toContain('width: calc(100% - var(--stream-monaco-diff-code-gap)) !important;')
+      expect(css).toMatch(
+        /\.char-insert \{\n  background: var\(--stream-monaco-added-inline\) !important;\n  border: 1px solid var\(--stream-monaco-added-inline-border\) !important;\n  border-radius: 6px;/,
+      )
+      expect(css).toContain('.char-insert.stream-monaco-full-line-inline-insert')
+      expect(css).toContain('.char-delete.stream-monaco-full-line-inline-delete')
+      expect(css).toMatch(
+        /\.inline-deleted-text \{\n  background: var\(--stream-monaco-removed-inline\) !important;\n  border: 1px solid var\(--stream-monaco-removed-inline-border\) !important;\n  border-radius: 6px;/,
+      )
+    }
+    finally {
+      ;(globalThis as any).document = originalDocument
+    }
+  })
+
+  it('marks full-line inline insert overlays without touching narrow inline ranges', () => {
+    class FakeElement {
+      className = ''
+      private readonly classes = new Set<string>()
+
+      constructor(
+        private readonly rect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>,
+      ) {}
+
+      classList = {
+        toggle: (name: string, force?: boolean) => {
+          if (force)
+            this.classes.add(name)
+          else
+            this.classes.delete(name)
+          return !!force
+        },
+        contains: (name: string) => this.classes.has(name),
+      }
+
+      getBoundingClientRect() {
+        return {
+          ...this.rect,
+          right: this.rect.left + this.rect.width,
+          bottom: this.rect.top + this.rect.height,
+          x: this.rect.left,
+          y: this.rect.top,
+          toJSON: () => this.rect,
+        } as DOMRect
+      }
+    }
+
+    const originalHTMLElement = (globalThis as any).HTMLElement
+    ;(globalThis as any).HTMLElement = FakeElement
+    const manager = new DiffEditorManager(
+      { readOnly: true } as any,
+      600,
+      '600px',
+      true,
+      true,
+      32,
+      2,
+      true,
+      75,
+    )
+
+    try {
+      const lineInsert = new FakeElement({ left: 26, top: 40, width: 294, height: 20 })
+      const fullLineInsert = new FakeElement({ left: 20, top: 40, width: 300, height: 20 })
+      const narrowInsert = new FakeElement({ left: 80, top: 40, width: 24, height: 20 })
+      ;(manager as any).lastContainer = {
+        querySelectorAll(selector: string) {
+          if (selector.includes('.line-insert'))
+            return [lineInsert]
+          if (selector.includes('.char-insert'))
+            return [fullLineInsert, narrowInsert]
+          return []
+        },
+      }
+
+      ;(manager as any).syncFullLineInlineDiffDecorations()
+
+      expect(fullLineInsert.classList.contains('stream-monaco-full-line-inline-insert')).toBe(true)
+      expect(narrowInsert.classList.contains('stream-monaco-full-line-inline-insert')).toBe(false)
+    }
+    finally {
+      ;(globalThis as any).HTMLElement = originalHTMLElement
+    }
+  })
+
   it('forwards hunk action wheel scrolling to the inline modified editor', () => {
     const manager = new DiffEditorManager(
       { readOnly: true } as any,
