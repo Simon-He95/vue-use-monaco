@@ -166,7 +166,14 @@ describe('DiffEditorManager diff presentation', () => {
 
       const css = appendedStyles[0]?.textContent ?? ''
       expect(css).toContain('--stream-monaco-diff-code-gap: 2px;')
-      expect(css).toContain('--stream-monaco-diff-code-padding: 6px;')
+      expect(css).toContain('--stream-monaco-diff-code-padding: 7.8px;')
+      expect(css).toContain('--stream-monaco-line-number-left: var(--stream-monaco-gutter-marker-width);')
+      expect(css).toContain('--stream-monaco-line-number-width: 15.6px;')
+      expect(css).toContain('--stream-monaco-line-number-padding-left: 15.6px;')
+      expect(css).toContain('--stream-monaco-line-number-padding-right: 7.8px;')
+      expect(css).toContain('--stream-monaco-line-number-box-width: calc(')
+      expect(css).toContain('--stream-monaco-line-number-gap-to-code: var(--stream-monaco-diff-code-gap);')
+      expect(css).toContain('--stream-monaco-line-number-align: right;')
       expect(css).toMatch(
         /\.line-insert \{\n  background: var\(--stream-monaco-added-line-fill\) !important;\n  border: 0 !important;\n  border-radius: 0 !important;/,
       )
@@ -174,14 +181,51 @@ describe('DiffEditorManager diff presentation', () => {
         /\.line-delete \{\n  background: var\(--stream-monaco-removed-line-fill\) !important;\n  border: 0 !important;\n  border-radius: 0 !important;/,
       )
       expect(css).toMatch(
+        /\.stream-monaco-diff-root\.stream-monaco-diff-style-bar \.monaco-editor \.line-insert,[\s\S]*?background: var\(--stream-monaco-added-line-fill\) !important;/,
+      )
+      expect(css).toMatch(
+        /\.stream-monaco-diff-root\.stream-monaco-diff-style-bar \.monaco-editor \.line-delete,[\s\S]*?background: var\(--stream-monaco-removed-line-fill\) !important;/,
+      )
+      expect(css).toMatch(
+        /\.stream-monaco-diff-root\.stream-monaco-diff-style-bar \.monaco-diff-editor \.gutter-insert \{[\s\S]*?var\(--stream-monaco-added-fg\) 0 4px,[\s\S]*?\),\n    var\(--stream-monaco-added-line-fill\) !important;/,
+      )
+      expect(css).toMatch(
+        /\.stream-monaco-diff-root\.stream-monaco-diff-style-bar \.monaco-diff-editor \.gutter-delete,[\s\S]*?var\(--stream-monaco-removed-fg\) 0 4px,[\s\S]*?\),\n    var\(--stream-monaco-removed-line-fill\) !important;/,
+      )
+      expect(css).not.toContain('color-mix(in srgb, var(--stream-monaco-added-line) 34%, transparent)')
+      expect(css).not.toContain('color-mix(in srgb, var(--stream-monaco-removed-line) 34%, transparent)')
+      expect(css).toMatch(
         /\.stream-monaco-fallback-line-insert \{\n  background: var\(--stream-monaco-added-line-fill\) !important;\n  border: 0 !important;\n  border-radius: 0 !important;/,
       )
       expect(css).toMatch(
         /\.stream-monaco-fallback-inline-delete-line \{[\s\S]*border-radius: 0;\n  box-shadow: var\(--stream-monaco-removed-line-shadow\);/,
       )
-      expect(css).toContain('padding-left: calc(var(--stream-monaco-diff-code-gap) + var(--stream-monaco-diff-code-padding)) !important;')
-      expect(css).toContain('margin-left: var(--stream-monaco-diff-code-gap) !important;')
-      expect(css).toContain('width: calc(100% - var(--stream-monaco-diff-code-gap)) !important;')
+      expect(css).toContain('background: var(--stream-monaco-removed-gutter), var(--stream-monaco-removed-line-fill) !important;')
+      expect(css).toContain('background: var(--stream-monaco-added-gutter), var(--stream-monaco-added-line-fill) !important;')
+      expect(css).toContain('padding-left: var(--stream-monaco-diff-code-padding);')
+      expect(css).toContain('background: var(--stream-monaco-removed-gutter), var(--stream-monaco-removed-line-fill);')
+      expect(css).toContain('padding-left: var(--stream-monaco-diff-code-padding) !important;')
+      expect(css).toContain('margin-left: 0 !important;')
+      expect(css).toContain('width: 100% !important;')
+      expect(css).toContain('.editor.modified .view-zones .view-lines.line-delete')
+      expect(css).toContain('background: var(--stream-monaco-removed-line-fill) !important;')
+      expect(css).toContain('background: var(--stream-monaco-line-number-bg) !important;')
+      expect(css).toContain('box-sizing: content-box !important;')
+      expect(css).toContain('padding-left: var(--stream-monaco-line-number-padding-left) !important;')
+      expect(css).toContain('padding-right: var(--stream-monaco-line-number-padding-right) !important;')
+      expect(css).toContain('font-variant-numeric: tabular-nums;')
+      expect(css).toMatch(
+        /\.line-delete\.line-numbers \{\n  background: var\(--stream-monaco-removed-line-fill\) !important;\n  color: var\(--stream-monaco-removed-fg\) !important;/,
+      )
+      expect(css).toMatch(
+        /\.line-insert\.line-numbers \{\n  background: var\(--stream-monaco-added-line-fill\) !important;\n  color: var\(--stream-monaco-added-fg\) !important;/,
+      )
+      expect(css).toMatch(
+        /\.stream-monaco-fallback-line-number-delete \{\n  background: var\(--stream-monaco-removed-line-fill\) !important;\n  color: var\(--stream-monaco-removed-fg\) !important;/,
+      )
+      expect(css).toMatch(
+        /\.stream-monaco-fallback-line-number-insert \{\n  background: var\(--stream-monaco-added-line-fill\) !important;\n  color: var\(--stream-monaco-added-fg\) !important;/,
+      )
       expect(css).toMatch(
         /\.char-insert \{\n  background: var\(--stream-monaco-added-inline\) !important;\n  border: 1px solid var\(--stream-monaco-added-inline-border\) !important;\n  border-radius: 6px;/,
       )
@@ -260,6 +304,83 @@ describe('DiffEditorManager diff presentation', () => {
 
       expect(fullLineInsert.classList.contains('stream-monaco-full-line-inline-insert')).toBe(true)
       expect(narrowInsert.classList.contains('stream-monaco-full-line-inline-insert')).toBe(false)
+    }
+    finally {
+      ;(globalThis as any).HTMLElement = originalHTMLElement
+    }
+  })
+
+  it('marks changed native line number nodes from line changes', () => {
+    class FakeElement {
+      private readonly classes = new Set<string>()
+      textContent = ''
+
+      constructor(text = '') {
+        this.textContent = text
+      }
+
+      classList = {
+        toggle: (name: string, force?: boolean) => {
+          if (force)
+            this.classes.add(name)
+          else
+            this.classes.delete(name)
+          return !!force
+        },
+        contains: (name: string) => this.classes.has(name),
+      }
+    }
+
+    class FakeRoot extends FakeElement {
+      constructor(private readonly nodes: FakeElement[]) {
+        super()
+      }
+
+      querySelectorAll(selector: string) {
+        return selector === '.line-numbers' ? this.nodes : []
+      }
+    }
+
+    const originalHTMLElement = (globalThis as any).HTMLElement
+    ;(globalThis as any).HTMLElement = FakeElement
+    const manager = new DiffEditorManager(
+      { readOnly: true } as any,
+      600,
+      '600px',
+      true,
+      true,
+      32,
+      2,
+      true,
+      75,
+    )
+
+    try {
+      const originalNodes = [new FakeElement('1'), new FakeElement('2'), new FakeElement('3')]
+      const modifiedNodes = [new FakeElement('1'), new FakeElement('2'), new FakeElement('3')]
+      ;(manager as any).diffEditorView = {
+        getOriginalEditor: () => ({
+          getContainerDomNode: () => new FakeRoot(originalNodes),
+        }),
+        getModifiedEditor: () => ({
+          getContainerDomNode: () => new FakeRoot(modifiedNodes),
+        }),
+      }
+
+      ;(manager as any).syncDiffLineNumberClasses([
+        {
+          originalStartLineNumber: 2,
+          originalEndLineNumber: 2,
+          modifiedStartLineNumber: 3,
+          modifiedEndLineNumber: 3,
+          charChanges: [],
+        },
+      ])
+
+      expect(originalNodes[1].classList.contains('line-delete')).toBe(true)
+      expect(originalNodes[0].classList.contains('line-delete')).toBe(false)
+      expect(modifiedNodes[2].classList.contains('line-insert')).toBe(true)
+      expect(modifiedNodes[1].classList.contains('line-insert')).toBe(false)
     }
     finally {
       ;(globalThis as any).HTMLElement = originalHTMLElement
@@ -739,7 +860,12 @@ describe('DiffEditorManager diff presentation', () => {
     const originalDocument = (globalThis as any).document
     const originalHTMLElement = (globalThis as any).HTMLElement
     class FakeElement {
-      constructor(public className: string) {}
+      attributes = new Map<string, string>()
+
+      constructor(
+        public className: string,
+        private readonly selectorMap: Record<string, FakeElement | null> = {},
+      ) {}
 
       matches(selector: string) {
         return selector.split(',').some((entry) => {
@@ -748,8 +874,16 @@ describe('DiffEditorManager diff presentation', () => {
         })
       }
 
-      querySelector() {
-        return null
+      querySelector(selector: string) {
+        return this.selectorMap[selector] ?? null
+      }
+
+      setAttribute(name: string, value: string) {
+        this.attributes.set(name, value)
+      }
+
+      getAttribute(name: string) {
+        return this.attributes.get(name) ?? null
       }
     }
     ;(globalThis as any).HTMLElement = FakeElement
@@ -776,13 +910,23 @@ describe('DiffEditorManager diff presentation', () => {
       ;(manager as any).clearFallbackInlineDeletedZones = DiffEditorManager.prototype[
         'clearFallbackInlineDeletedZones'
       ]
+      const nativeDeleteMarker = new FakeElement('view-lines line-delete monaco-mouse-cursor-text')
+      const nativeMarginMarker = new FakeElement('inline-deleted-margin-view-zone')
+      const viewWrapper = new FakeElement('', {
+        '.view-lines.line-delete': nativeDeleteMarker,
+      })
+      viewWrapper.setAttribute('monaco-view-zone', 'native-1')
+      const marginWrapper = new FakeElement('', {
+        '.inline-deleted-margin-view-zone': nativeMarginMarker,
+      })
+      marginWrapper.setAttribute('monaco-view-zone', 'native-1')
       ;(manager as any).lastContainer = {
         classList,
         querySelectorAll(selector: string) {
           if (selector.includes('.editor.modified .view-zones [monaco-view-zone]'))
-            return [new FakeElement('view-lines line-delete monaco-mouse-cursor-text')]
+            return [viewWrapper]
           if (selector.includes('.editor.modified .margin-view-zones [monaco-view-zone]'))
-            return [new FakeElement('inline-deleted-margin-view-zone')]
+            return [marginWrapper]
           return []
         },
         querySelector: vi.fn(() => null),
@@ -828,6 +972,155 @@ describe('DiffEditorManager diff presentation', () => {
 
       expect(classList.contains('stream-monaco-diff-inline-native-ready')).toBe(true)
       expect(addedZones).toHaveLength(0)
+    }
+    finally {
+      ;(globalThis as any).document = originalDocument
+      ;(globalThis as any).HTMLElement = originalHTMLElement
+    }
+  })
+
+  it('keeps inline delete fallback active until native margin zones appear', () => {
+    const originalDocument = (globalThis as any).document
+    const originalHTMLElement = (globalThis as any).HTMLElement
+    class FakeElement {
+      attributes = new Map<string, string>()
+      className = ''
+      style: Record<string, string> = {}
+      children: any[] = []
+      textContent = ''
+
+      constructor(
+        private readonly selectorMap: Record<string, FakeElement | null> = {},
+      ) {}
+
+      matches(selector: string) {
+        return selector.split(',').some((entry) => {
+          const parts = entry.trim().split('.').filter(Boolean)
+          return parts.every(part => this.className.split(/\s+/).includes(part))
+        })
+      }
+
+      querySelector(selector: string) {
+        return this.selectorMap[selector] ?? null
+      }
+
+      append(node: any) {
+        this.children.push(node)
+      }
+
+      setAttribute(name: string, value: string) {
+        this.attributes.set(name, value)
+      }
+
+      getAttribute(name: string) {
+        return this.attributes.get(name) ?? null
+      }
+    }
+    ;(globalThis as any).HTMLElement = FakeElement
+    ;(globalThis as any).document = {
+      createElement() {
+        return new FakeElement()
+      },
+    }
+
+    try {
+      const { manager, classList } = createPresentationHarness(true)
+      const addedZones: any[] = []
+      const firstNativeDeleteMarker = new FakeElement()
+      firstNativeDeleteMarker.className = 'view-lines line-delete monaco-mouse-cursor-text'
+      const secondNativeDeleteMarker = new FakeElement()
+      secondNativeDeleteMarker.className = 'view-lines line-delete monaco-mouse-cursor-text'
+      const firstNativeMarginMarker = new FakeElement()
+      firstNativeMarginMarker.className = 'inline-deleted-margin-view-zone'
+      const firstViewWrapper = new FakeElement({
+        '.view-lines.line-delete': firstNativeDeleteMarker,
+      })
+      firstViewWrapper.setAttribute('monaco-view-zone', 'native-1')
+      const secondViewWrapper = new FakeElement({
+        '.view-lines.line-delete': secondNativeDeleteMarker,
+      })
+      secondViewWrapper.setAttribute('monaco-view-zone', 'native-2')
+      const firstMarginWrapper = new FakeElement({
+        '.inline-deleted-margin-view-zone': firstNativeMarginMarker,
+      })
+      firstMarginWrapper.setAttribute('monaco-view-zone', 'native-1')
+
+      ;(manager as any).isDiffInlineMode = () => true
+      ;(manager as any).inlineDiffStreamingPresentationActive = true
+      ;(manager as any).hasFreshNativeDiffResult = () => false
+      ;(manager as any).getEffectiveLineChanges = () => [
+        {
+          originalStartLineNumber: 1,
+          originalEndLineNumber: 1,
+          modifiedStartLineNumber: 1,
+          modifiedEndLineNumber: 0,
+          charChanges: [],
+        },
+        {
+          originalStartLineNumber: 2,
+          originalEndLineNumber: 2,
+          modifiedStartLineNumber: 1,
+          modifiedEndLineNumber: 0,
+          charChanges: [],
+        },
+      ]
+      ;(manager as any).lastContainer = {
+        classList,
+        querySelectorAll(selector: string) {
+          if (selector.includes('.editor.modified .view-zones [monaco-view-zone]'))
+            return [firstViewWrapper, secondViewWrapper]
+          if (selector.includes('.editor.modified .margin-view-zones [monaco-view-zone]'))
+            return [firstMarginWrapper]
+          return []
+        },
+        querySelector: vi.fn(() => null),
+      }
+      ;(manager as any).originalModel = {
+        getAlternativeVersionId: () => 2,
+        getValue: () => 'const first = 1\nconst second = 2',
+        getLineContent: (line: number) =>
+          ['const first = 1', 'const second = 2'][line - 1] ?? '',
+      }
+      ;(manager as any).modifiedModel = {
+        getAlternativeVersionId: () => 2,
+        getValue: () => '',
+        getLineCount: () => 1,
+      }
+      ;(manager as any).diffEditorView = {
+        getLineChanges: () => null,
+        getOriginalEditor: () => ({
+          deltaDecorations: vi.fn((_: string[], next: unknown[]) =>
+            next.map((_, index) => `original-${index}`)),
+        }),
+        getModifiedEditor: () => ({
+          deltaDecorations: vi.fn((_: string[], next: unknown[]) =>
+            next.map((_, index) => `modified-${index}`)),
+          getModel: () => (manager as any).modifiedModel,
+          getOption: () => 20,
+          applyFontInfo: vi.fn(),
+          changeViewZones(callback: (accessor: {
+            addZone: (zone: any) => string
+            removeZone: (id: string) => void
+          }) => void) {
+            callback({
+              addZone(zone) {
+                addedZones.push(zone)
+                return `zone-${addedZones.length}`
+              },
+              removeZone() {},
+            })
+          },
+        }),
+      }
+
+      ;(manager as any).syncDiffPresentationDecorations()
+
+      expect(classList.contains('stream-monaco-diff-inline-native-ready')).toBe(false)
+      expect(classList.contains('stream-monaco-diff-native-stale')).toBe(true)
+      expect(addedZones).toHaveLength(2)
+      expect(addedZones[0].marginDomNode.className).toBe(
+        'stream-monaco-fallback-inline-delete-margin',
+      )
     }
     finally {
       ;(globalThis as any).document = originalDocument
