@@ -257,9 +257,7 @@ function recordHeight(height: number, metrics: HeightMetrics) {
 }
 
 function observeHeight(target: HTMLElement, metrics: HeightMetrics, editorApi: typeof baselineEditor) {
-  const observer = new ResizeObserver((entries) => {
-    const height = entries[0]?.contentRect.height ?? 0
-    recordHeight(height, metrics)
+  const observer = new ResizeObserver(() => {
     sampleContainer(target, metrics, editorApi)
   })
   observer.observe(target)
@@ -288,6 +286,14 @@ function startFrameSampler() {
   stopFrameSampler()
   frameLastAt = performance.now()
   const tick = (now: number) => {
+    if (baselineEl.value)
+      recordHeight(baselineEl.value.getBoundingClientRect().height, baselineMetrics)
+    if (smoothEl.value)
+      recordHeight(smoothEl.value.getBoundingClientRect().height, smoothMetrics)
+    if (constrainedBaselineEl.value)
+      recordHeight(constrainedBaselineEl.value.getBoundingClientRect().height, constrainedBaselineMetrics)
+    if (constrainedSmoothEl.value)
+      recordHeight(constrainedSmoothEl.value.getBoundingClientRect().height, constrainedSmoothMetrics)
     const gap = now - frameLastAt
     frameLastAt = now
     runtimeMetrics.frames += 1
