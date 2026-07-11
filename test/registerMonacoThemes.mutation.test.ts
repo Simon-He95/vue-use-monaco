@@ -1,6 +1,44 @@
 import { describe, expect, it, vi } from 'vitest'
 
 describe('registerMonacoThemes', () => {
+  it('restores the requested theme synchronously after Shiki patches Monaco', async () => {
+    vi.resetModules()
+
+    const setTheme = vi.fn()
+    const createHighlighter = vi.fn(async () => ({
+      getLoadedThemes: () => ['andromeeda', 'vitesse-dark'],
+      getLoadedLanguages: () => [],
+      getTheme: vi.fn(),
+      setTheme: vi.fn(() => ({ colorMap: [] })),
+    }))
+    const shikiToMonaco = vi.fn((_highlighter, monacoProxy) => {
+      monacoProxy.editor.setTheme('andromeeda')
+    })
+    vi.doMock('shiki', () => ({ createHighlighter }))
+    vi.doMock('@shikijs/monaco', () => ({ shikiToMonaco }))
+    vi.doMock('../src/monaco-shim', () => {
+      const editor = { defineTheme: vi.fn(), setTheme, create: vi.fn() }
+      const languages = {
+        getLanguages: () => [],
+        register: vi.fn(),
+        setTokensProvider: vi.fn(() => ({ dispose() {} })),
+      }
+      return { default: { editor, languages }, editor, languages, Range: class {} }
+    })
+
+    const { registerMonacoThemes } = await import('../src/utils/registerMonacoThemes')
+    await registerMonacoThemes(
+      ['andromeeda', 'vitesse-dark'],
+      ['plaintext'],
+      'vitesse-dark',
+    )
+
+    expect(setTheme.mock.calls).toEqual([
+      ['andromeeda'],
+      ['vitesse-dark'],
+    ])
+  })
+
   it('reuses an in-flight superset registration and skips completed coverage', async () => {
     vi.resetModules()
 
