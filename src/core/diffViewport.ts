@@ -3,6 +3,7 @@ import * as monaco from '../monaco-shim'
 
 interface ComputeDiffRawHeightOptions {
   diffEditorView: monaco.editor.IStandaloneDiffEditor | null
+  editorPadding?: { top?: number, bottom?: number }
   maxHeightValue: number
 }
 
@@ -28,6 +29,7 @@ interface NearBottomOptions {
 
 export function computeDiffRawHeight({
   diffEditorView,
+  editorPadding,
   maxHeightValue,
 }: ComputeDiffRawHeightOptions): number {
   if (!diffEditorView)
@@ -41,12 +43,21 @@ export function computeDiffRawHeight({
   const originalLineCount = originalEditor.getModel()?.getLineCount() ?? 1
   const modifiedLineCount = modifiedEditor.getModel()?.getLineCount() ?? 1
   const lineCount = Math.max(originalLineCount, modifiedLineCount)
-  const fromLines = lineCount * lineHeight + padding
-  const scrollHeight = Math.max(
-    originalEditor.getScrollHeight?.() ?? 0,
-    modifiedEditor.getScrollHeight?.() ?? 0,
+  const verticalPadding = editorPadding == null
+    ? padding
+    : Math.max(0, editorPadding.top ?? 0) + Math.max(0, editorPadding.bottom ?? 0)
+  const fromLines = lineCount * lineHeight + verticalPadding
+  const contentHeight = Math.max(
+    originalEditor.getContentHeight?.() ?? 0,
+    modifiedEditor.getContentHeight?.() ?? 0,
   )
-  return Math.min(Math.max(fromLines, scrollHeight), maxHeightValue)
+  const renderedHeight = contentHeight > 0
+    ? contentHeight
+    : Math.max(
+        originalEditor.getScrollHeight?.() ?? 0,
+        modifiedEditor.getScrollHeight?.() ?? 0,
+      )
+  return Math.min(Math.max(fromLines, renderedHeight), maxHeightValue)
 }
 
 export function computeDiffHeight({

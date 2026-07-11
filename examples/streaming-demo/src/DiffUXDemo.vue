@@ -389,19 +389,23 @@ const referenceLineDigits = computed(() =>
   Math.max(2, String(referenceLineCount.value).length),
 )
 const referenceLineNumberWidth = computed(
-  () => 36 + Math.max(0, referenceLineDigits.value - 2) * 12,
+  () => referenceLineDigits.value * 7.8,
 )
 const referenceGutterMetrics = computed(() => {
   const markerWidth = 4
-  const gap = 16
+  const gap = 7.8
+  const paddingLeft = 15.6
+  const paddingRight = 7.8
   const numberWidth = referenceLineNumberWidth.value
-  const marginWidth = markerWidth + gap * 2 + numberWidth
+  const marginWidth = markerWidth + paddingLeft + numberWidth + paddingRight + gap
   return {
     markerWidth,
     gap,
+    paddingLeft,
+    paddingRight,
     numberWidth,
     marginWidth,
-    lineNumberLeft: markerWidth + gap,
+    lineNumberLeft: markerWidth,
   }
 })
 const editorInlineStyle = computed<Record<string, string>>(() => {
@@ -412,6 +416,9 @@ const editorInlineStyle = computed<Record<string, string>>(() => {
     '--stream-monaco-gutter-gap': `${referenceGutterMetrics.value.gap}px`,
     '--stream-monaco-line-number-left': `${referenceGutterMetrics.value.lineNumberLeft}px`,
     '--stream-monaco-line-number-width': `${referenceGutterMetrics.value.numberWidth}px`,
+    '--stream-monaco-line-number-padding-left': `${referenceGutterMetrics.value.paddingLeft}px`,
+    '--stream-monaco-line-number-padding-right': `${referenceGutterMetrics.value.paddingRight}px`,
+    '--stream-monaco-line-number-gap-to-code': `${referenceGutterMetrics.value.gap}px`,
     '--stream-monaco-original-margin-width': marginWidth,
     '--stream-monaco-original-scrollable-left': marginWidth,
     '--stream-monaco-original-scrollable-width': `calc(100% - ${marginWidth})`,
@@ -2623,18 +2630,21 @@ onBeforeUnmount(() => {
   --stream-monaco-gutter-bg: var(--demo-diff-gutter-bg);
   --stream-monaco-gutter-guide: var(--demo-diff-gutter-guide);
   --stream-monaco-gutter-marker-width: 4px;
-  --stream-monaco-gutter-gap: 16px;
+  --stream-monaco-gutter-gap: 7.8px;
   --stream-monaco-line-number: var(--demo-diff-line-number);
   --stream-monaco-line-number-active: var(--demo-diff-line-number-active);
-  --stream-monaco-line-number-left: calc(
-    var(--stream-monaco-gutter-marker-width) + var(--stream-monaco-gutter-gap)
-  );
-  --stream-monaco-line-number-width: 36px;
-  --stream-monaco-line-number-align: center;
+  --stream-monaco-line-number-left: var(--stream-monaco-gutter-marker-width);
+  --stream-monaco-line-number-width: 15.6px;
+  --stream-monaco-line-number-padding-left: 15.6px;
+  --stream-monaco-line-number-padding-right: 7.8px;
+  --stream-monaco-line-number-gap-to-code: 7.8px;
+  --stream-monaco-line-number-align: right;
   --stream-monaco-original-margin-width: calc(
     var(--stream-monaco-gutter-marker-width) +
-      (var(--stream-monaco-gutter-gap) * 2) +
-      var(--stream-monaco-line-number-width)
+      var(--stream-monaco-line-number-padding-left) +
+      var(--stream-monaco-line-number-width) +
+      var(--stream-monaco-line-number-padding-right) +
+      var(--stream-monaco-line-number-gap-to-code)
   );
   --stream-monaco-original-scrollable-left: var(
     --stream-monaco-original-margin-width
@@ -2644,8 +2654,10 @@ onBeforeUnmount(() => {
   );
   --stream-monaco-modified-margin-width: calc(
     var(--stream-monaco-gutter-marker-width) +
-      (var(--stream-monaco-gutter-gap) * 2) +
-      var(--stream-monaco-line-number-width)
+      var(--stream-monaco-line-number-padding-left) +
+      var(--stream-monaco-line-number-width) +
+      var(--stream-monaco-line-number-padding-right) +
+      var(--stream-monaco-line-number-gap-to-code)
   );
   --stream-monaco-modified-scrollable-left: var(
     --stream-monaco-modified-margin-width
@@ -2684,16 +2696,19 @@ onBeforeUnmount(() => {
   --stream-monaco-gutter-guide: transparent;
   --stream-monaco-line-number: rgb(100 116 139 / 0.56);
   --stream-monaco-line-number-active: rgb(100 116 139 / 0.56);
-  --stream-monaco-gutter-gap: 16px;
-  --stream-monaco-line-number-left: calc(
-    var(--stream-monaco-gutter-marker-width) + var(--stream-monaco-gutter-gap)
-  );
-  --stream-monaco-line-number-width: 36px;
-  --stream-monaco-line-number-align: center;
+  --stream-monaco-gutter-gap: 7.8px;
+  --stream-monaco-line-number-left: var(--stream-monaco-gutter-marker-width);
+  --stream-monaco-line-number-width: 15.6px;
+  --stream-monaco-line-number-padding-left: 15.6px;
+  --stream-monaco-line-number-padding-right: 7.8px;
+  --stream-monaco-line-number-gap-to-code: 7.8px;
+  --stream-monaco-line-number-align: right;
   --stream-monaco-modified-margin-width: calc(
     var(--stream-monaco-gutter-marker-width) +
-      (var(--stream-monaco-gutter-gap) * 2) +
-      var(--stream-monaco-line-number-width)
+      var(--stream-monaco-line-number-padding-left) +
+      var(--stream-monaco-line-number-width) +
+      var(--stream-monaco-line-number-padding-right) +
+      var(--stream-monaco-line-number-gap-to-code)
   );
   --stream-monaco-added-fg: #14b8a6;
   --stream-monaco-removed-fg: #f43f5e;

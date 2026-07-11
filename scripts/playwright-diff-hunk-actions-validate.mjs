@@ -212,6 +212,63 @@ async function waitForExpectedState(page, expected, expectedDiffCount) {
   )
 }
 
+async function readPassiveInteractionState(page) {
+  return page.evaluate(() => {
+    const readRect = (selector) => {
+      const node = document.querySelector(selector)
+      if (!(node instanceof HTMLElement)) return null
+      const rect = node.getBoundingClientRect()
+      return {
+        x: Math.round(rect.x * 100) / 100,
+        y: Math.round(rect.y * 100) / 100,
+        width: Math.round(rect.width * 100) / 100,
+        height: Math.round(rect.height * 100) / 100,
+      }
+    }
+    return {
+      values: window.__streamMonacoDiffTestApi?.getDiffValues?.() ?? null,
+      summary: window.__streamMonacoDiffTestApi?.getDiffSummary?.() ?? null,
+      root: readRect('.monaco-diff-editor'),
+      original: readRect('.monaco-diff-editor .editor.original'),
+      modified: readRect('.monaco-diff-editor .editor.modified'),
+      fallbackDeleteZones: document.querySelectorAll(
+        '.stream-monaco-fallback-inline-delete-zone',
+      ).length,
+    }
+  })
+}
+
+async function validatePassiveInteractions(page) {
+  await invokeDiffTestApi(page, 'setDiffPair', fixtures.inserted.pair, {
+    preserveViewState: false,
+  })
+  await waitForDiffFixture(page)
+
+  const line = page
+    .locator('.editor.modified .view-lines .view-line')
+    .filter({ hasText: 'const alpha = 1' })
+    .first()
+  await line.waitFor({ state: 'visible', timeout: 5000 })
+  const box = await line.boundingBox()
+  if (!box) throw new Error('Unable to measure passive interaction line')
+
+  const before = await readPassiveInteractionState(page)
+  await line.click()
+  await line.dblclick()
+  await page.mouse.move(box.x + 8, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + Math.min(box.width - 8, 180), box.y + box.height / 2)
+  await page.mouse.up()
+  await page.waitForTimeout(150)
+  const after = await readPassiveInteractionState(page)
+
+  return {
+    ok: JSON.stringify(before) === JSON.stringify(after),
+    before,
+    after,
+  }
+}
+
 async function runCase(page, scenario) {
   const fixture = fixtures[scenario.fixture]
   if (!fixture) throw new Error(`Unknown fixture: ${scenario.fixture}`)
@@ -334,6 +391,7 @@ async function run() {
     )
     await page.waitForTimeout(800)
 
+    const passiveInteractions = await validatePassiveInteractions(page)
     const results = []
     for (const scenario of cases) {
       // eslint-disable-next-line no-await-in-loop
@@ -345,6 +403,7 @@ async function run() {
     const ok =
       pageErrors.length === 0 &&
       consoleErrors.length === 0 &&
+      passiveInteractions.ok &&
       results.every((result) => result.ok)
 
     const result = {
@@ -352,6 +411,7 @@ async function run() {
       url,
       pageErrors,
       consoleErrors,
+      passiveInteractions,
       results,
     }
 

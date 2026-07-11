@@ -10,6 +10,38 @@ const LEGACY_MONACO_LANGS_INIT_KEY = '__streamMonacoLegacyMonacoLangsInit__'
 // Private benchmark hooks; not a public API.
 const PERF_HOOKS_ENABLED_KEY = '__STREAM_MONACO_ENABLE_INTERNAL_PERF_HOOKS__'
 let instrumentedHighlighterCache = new WeakMap<object, import('../type').ShikiHighlighter>()
+let defaultShikiEnginePromise: Promise<unknown | null> | null = null
+let defaultMonacoLanguagesPromise: Promise<void> | null = null
+
+async function ensureDefaultMonacoLanguageContributions() {
+  if (typeof window === 'undefined')
+    return
+
+  if (!defaultMonacoLanguagesPromise) {
+    const pending = Promise.all([
+      import('monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution'),
+      import('monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution'),
+      import('monaco-editor/esm/vs/basic-languages/css/css.contribution'),
+      import('monaco-editor/esm/vs/basic-languages/html/html.contribution'),
+      import('monaco-editor/esm/vs/basic-languages/python/python.contribution'),
+      import('monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution'),
+      import('monaco-editor/esm/vs/basic-languages/shell/shell.contribution'),
+      import('monaco-editor/esm/vs/basic-languages/powershell/powershell.contribution'),
+      import('monaco-editor/esm/vs/language/json/monaco.contribution'),
+      import('monaco-editor/esm/vs/language/typescript/monaco.contribution'),
+      import('monaco-editor/esm/vs/language/html/monaco.contribution'),
+      import('monaco-editor/esm/vs/language/css/monaco.contribution'),
+    ]).then(() => undefined)
+    const retryable = pending.catch((error) => {
+      if (defaultMonacoLanguagesPromise === retryable)
+        defaultMonacoLanguagesPromise = null
+      throw error
+    })
+    defaultMonacoLanguagesPromise = retryable
+  }
+
+  await defaultMonacoLanguagesPromise
+}
 
 async function awaitLegacyOnigurumaInitIfPresent() {
   try {
@@ -39,10 +71,24 @@ async function getLegacyShikiEngineIfPresent() {
   return null
 }
 
+async function getDefaultShikiEngine() {
+  defaultShikiEnginePromise ??= (async () => {
+    try {
+      const shiki = await import('shiki')
+      if (typeof (shiki as any).createJavaScriptRegexEngine === 'function')
+        return (shiki as any).createJavaScriptRegexEngine()
+    }
+    catch {}
+    return null
+  })()
+
+  return defaultShikiEnginePromise
+}
+
 async function createHighlighterWithLegacyEngineIfNeeded(options: any) {
   await awaitLegacyOnigurumaInitIfPresent()
   await awaitLegacyMonacoLanguageContributionsIfPresent()
-  const engine = await getLegacyShikiEngineIfPresent()
+  const engine = options?.engine ?? await getLegacyShikiEngineIfPresent() ?? await getDefaultShikiEngine()
   if (engine)
     return createHighlighter({ ...options, engine })
   return createHighlighter(options)
@@ -61,6 +107,31 @@ function enqueueRegistration<T>(task: () => Promise<T>): Promise<T> {
   // keep queue alive even if a task rejects
   registrationQueue = next.then(() => undefined, () => undefined)
   return next
+}
+
+type RegisteredHighlighter = import('../type').ShikiHighlighter
+
+interface PendingRegistration {
+  themeKeys: Set<string>
+  languages: Set<string>
+  promise: Promise<RegisteredHighlighter | null>
+}
+
+const completedThemeKeys = new Set<string>()
+const completedLanguages = new Set<string>()
+const tokenlessLanguages = new Set(['plain', 'plaintext'])
+const pendingRegistrations = new Set<PendingRegistration>()
+let lastRegisteredHighlighter: RegisteredHighlighter | null = null
+let registrationGeneration = 0
+
+function coversRegistration(
+  availableThemes: Set<string>,
+  availableLanguages: Set<string>,
+  requestedThemes: Set<string>,
+  requestedLanguages: Set<string>,
+) {
+  return Array.from(requestedThemes).every(theme => availableThemes.has(theme))
+    && Array.from(requestedLanguages).every(language => availableLanguages.has(language))
 }
 export function getThemeRegisterPromise() {
   return themeRegisterPromise
@@ -205,6 +276,11 @@ function recordThemeRegistration(
   catch {}
 }
 
+function isBrokenShikiProviderError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes('compileAG')
+}
+
 function getProxyMember(target: any, prop: string | symbol) {
   const value = Reflect.get(target, prop, target)
   // Keep Shiki/TextMate methods bound to their real object. Calling methods with
@@ -288,7 +364,7 @@ async function ensureMonacoHighlighter(
   if (!monacoHighlighterPromise) {
     const initialThemes = Array.from(monacoThemeByKey.values())
     const initialLangs = Array.from(monacoLanguageSet.values())
-    monacoHighlighterPromise = createHighlighterWithLegacyEngineIfNeeded({ themes: initialThemes, langs: initialLangs })
+    const pending = createHighlighterWithLegacyEngineIfNeeded({ themes: initialThemes, langs: initialLangs })
       .then((h) => {
         ;(h as any).__streamMonacoLoadedThemes = new Set(
           initialThemes.map(t => themeKey(t)),
@@ -296,6 +372,12 @@ async function ensureMonacoHighlighter(
         ;(h as any).__streamMonacoLoadedLangs = new Set(initialLangs)
         return h
       })
+    const retryable = pending.catch((error) => {
+      if (monacoHighlighterPromise === retryable)
+        monacoHighlighterPromise = null
+      throw error
+    })
+    monacoHighlighterPromise = retryable
   }
 
   const h = await monacoHighlighterPromise
@@ -368,10 +450,17 @@ export function clearHighlighterCache() {
   lastPatchedLanguages = new Set<string>()
   monacoThemeByKey.clear()
   monacoLanguageSet.clear()
+  defaultShikiEnginePromise = null
+  defaultMonacoLanguagesPromise = null
   themeRegisterPromise = null
   instrumentedHighlighterCache = new WeakMap()
   languagesRegistered = false
   currentLanguages = []
+  completedThemeKeys.clear()
+  completedLanguages.clear()
+  pendingRegistrations.clear()
+  lastRegisteredHighlighter = null
+  registrationGeneration++
 }
 
 /**
@@ -469,15 +558,50 @@ export { getOrCreateHighlighter }
 // `monaco.editor.setTheme(themeName)` is sufficient for editor theme changes.
 // If consumers need to directly control a shiki highlighter they can use
 // `getOrCreateHighlighter(...)` and call methods on the returned object.
-export async function registerMonacoThemes(
+export function registerMonacoThemes(
   themes: (ThemeInput | string | SpecialTheme)[],
   languages: string[],
 ): Promise<import('../type').ShikiHighlighter | null> {
-  return enqueueRegistration(async () => {
+  const requestedThemeKeys = new Set(themes.map(themeKey))
+  const requestedLanguages = new Set(languages)
+
+  if (
+    lastRegisteredHighlighter
+    && coversRegistration(
+      completedThemeKeys,
+      completedLanguages,
+      requestedThemeKeys,
+      requestedLanguages,
+    )
+  ) {
+    return Promise.resolve(lastRegisteredHighlighter)
+  }
+
+  for (const pending of pendingRegistrations) {
+    if (
+      coversRegistration(
+        pending.themeKeys,
+        pending.languages,
+        requestedThemeKeys,
+        requestedLanguages,
+      )
+    ) {
+      return pending.promise
+    }
+  }
+
+  const generation = registrationGeneration
+  const pending = {
+    themeKeys: requestedThemeKeys,
+    languages: requestedLanguages,
+    promise: null as unknown as Promise<RegisteredHighlighter | null>,
+  }
+  const task = enqueueRegistration(async () => {
     const registrationStartedAt = nowMs()
     let ensureHighlighterMs = 0
     let patchMonacoMs = 0
     let patchedMonaco = false
+    await ensureDefaultMonacoLanguageContributions()
     registerMonacoLanguages(languages)
 
     const p = (async () => {
@@ -500,6 +624,7 @@ export async function registerMonacoThemes(
       if (needsLanguagePatch) {
         if (lastPatchedHighlighter !== highlighter)
           lastPatchedLanguages = new Set<string>()
+        const successfullyPatchedLanguages = new Set(lastPatchedLanguages)
 
         // In some bundlers (notably Webpack 4), Shiki/TextMate tokenization can
         // still throw at runtime (e.g. `null.compileAG`) due to regex engine
@@ -528,6 +653,18 @@ export async function registerMonacoThemes(
             setTokensProvider(lang: string, provider: any) {
               if (provider && typeof provider.tokenize === 'function') {
                 const originalTokenize = provider.tokenize.bind(provider)
+                const getInitialState = typeof provider.getInitialState === 'function'
+                  ? provider.getInitialState.bind(provider)
+                  : null
+
+                try {
+                  originalTokenize('const a = 1', getInitialState?.() ?? null)
+                }
+                catch (error) {
+                  if (isBrokenShikiProviderError(error))
+                    return { dispose() {} }
+                }
+
                 provider = {
                   ...provider,
                   tokenize(line: string, state: any) {
@@ -555,7 +692,10 @@ export async function registerMonacoThemes(
                   },
                 }
               }
-              return setTokensProvider?.(lang, provider)
+              const disposable = setTokensProvider?.(lang, provider)
+              if (setTokensProvider)
+                successfullyPatchedLanguages.add(lang)
+              return disposable
             },
           },
         }
@@ -565,7 +705,7 @@ export async function registerMonacoThemes(
         patchMonacoMs = nowMs() - patchMonacoStartedAt
         patchedMonaco = true
         lastPatchedHighlighter = highlighter
-        lastPatchedLanguages = new Set(wantsLangs)
+        lastPatchedLanguages = successfullyPatchedLanguages
       }
 
       // Track last language set for Monaco language registration short-circuit.
@@ -584,6 +724,15 @@ export async function registerMonacoThemes(
         languages: languages.length,
         patchedMonaco,
       })
+      if (generation === registrationGeneration) {
+        for (const key of requestedThemeKeys)
+          completedThemeKeys.add(key)
+        for (const language of requestedLanguages) {
+          if (lastPatchedLanguages.has(language) || tokenlessLanguages.has(language))
+            completedLanguages.add(language)
+        }
+        lastRegisteredHighlighter = res
+      }
       return res
     }
     catch (e) {
@@ -591,6 +740,12 @@ export async function registerMonacoThemes(
       throw e
     }
   })
+
+  pending.promise = task.finally(() => {
+    pendingRegistrations.delete(pending)
+  })
+  pendingRegistrations.add(pending)
+  return pending.promise
 }
 
 function registerMonacoLanguages(languages: string[]) {

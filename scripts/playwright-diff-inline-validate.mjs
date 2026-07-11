@@ -48,15 +48,29 @@ async function waitForPort(port, ms = 20000) {
   }
 }
 
-function killProcessTree(child) {
-  if (!child || child.killed) return
-  try {
-    child.kill('SIGTERM')
-  } catch {}
-  setTimeout(() => {
+function isProcessAlive(child) {
+  return child.exitCode == null && child.signalCode == null
+}
+
+function signalProcessTree(child, signal) {
+  if (!child) return
+  if (process.platform !== 'win32' && child.pid) {
     try {
-      if (!child.killed) child.kill('SIGKILL')
+      process.kill(-child.pid, signal)
+      return
     } catch {}
+  }
+  if (!isProcessAlive(child)) return
+  try {
+    child.kill(signal)
+  } catch {}
+}
+
+function killProcessTree(child) {
+  if (!child) return
+  signalProcessTree(child, 'SIGTERM')
+  setTimeout(() => {
+    signalProcessTree(child, 'SIGKILL')
   }, 3000).unref?.()
 }
 
@@ -161,7 +175,7 @@ async function collectMetrics(page, options) {
     theme,
   )}&lines=${encodeURIComponent(lines)}&unchangedStyle=${encodeURIComponent(
     unchangedStyle,
-  )}&capture=1`
+  )}&columns=1&capture=1`
 
   await page.goto(url, { waitUntil: 'networkidle' })
   await page.waitForSelector('.editor-card', { timeout: 20000 })
@@ -259,7 +273,7 @@ async function collectMetrics(page, options) {
     !metrics.diffClass.includes('side-by-side') ||
     (metrics.original?.width ?? 0) < 24
 
-  let ok = cardOverflow <= 1 && tabsOverflow <= 1 && fileStatsOverflow <= 1
+  let ok = inlineMode && cardOverflow <= 1 && tabsOverflow <= 1 && fileStatsOverflow <= 1
   if (inlineMode) {
     ok =
       ok &&
@@ -315,7 +329,7 @@ async function run() {
       String(port),
       '--strictPort',
     ],
-    { stdio: ['ignore', 'pipe', 'pipe'], env: process.env },
+    { stdio: ['ignore', 'pipe', 'pipe'], env: process.env, detached: process.platform !== 'win32' },
   )
 
   const logs = []

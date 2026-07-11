@@ -1,6 +1,113 @@
 import { describe, expect, it, vi } from 'vitest'
 
 describe('registerMonacoThemes', () => {
+  it('reuses an in-flight superset registration and skips completed coverage', async () => {
+    vi.resetModules()
+
+    let resolveHighlighter!: (value: object) => void
+    const createHighlighter = vi.fn(() => new Promise<object>((resolve) => {
+      resolveHighlighter = resolve
+    }))
+    const shikiToMonaco = vi.fn((_highlighter, monacoProxy) => {
+      for (const language of ['javascript', 'json']) {
+        monacoProxy.languages.setTokensProvider(language, {
+          tokenize: () => ({ endState: {}, tokens: [] }),
+        })
+      }
+    })
+    vi.doMock('shiki', () => ({ createHighlighter }))
+    vi.doMock('@shikijs/monaco', () => ({ shikiToMonaco }))
+    vi.doMock('../src/monaco-shim', () => {
+      const editor = { defineTheme: vi.fn(), setTheme: vi.fn(), create: vi.fn() }
+      const languages = {
+        getLanguages: () => [],
+        register: vi.fn(),
+        setTokensProvider: vi.fn(() => ({ dispose() {} })),
+      }
+      return { default: { editor, languages }, editor, languages, Range: class {} }
+    })
+
+    const { registerMonacoThemes } = await import('../src/utils/registerMonacoThemes')
+    const fullRegistration = registerMonacoThemes(
+      ['vitesse-dark', 'vitesse-light'],
+      ['javascript', 'json'],
+    )
+    const subsetRegistration = registerMonacoThemes(['vitesse-dark'], ['javascript'])
+
+    expect(subsetRegistration).toBe(fullRegistration)
+    await vi.waitFor(() => expect(createHighlighter).toHaveBeenCalledTimes(1))
+    resolveHighlighter({
+      loadTheme: vi.fn(async () => undefined),
+      loadLanguage: vi.fn(async () => undefined),
+    })
+    await fullRegistration
+    await registerMonacoThemes(['vitesse-dark'], ['javascript'])
+
+    expect(createHighlighter).toHaveBeenCalledTimes(1)
+    expect(shikiToMonaco).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not repeat registration for plaintext without a token provider', async () => {
+    vi.resetModules()
+
+    const createHighlighter = vi.fn(async () => ({
+      loadTheme: vi.fn(async () => undefined),
+      loadLanguage: vi.fn(async () => undefined),
+    }))
+    const shikiToMonaco = vi.fn((_highlighter, monacoProxy) => {
+      monacoProxy.languages.setTokensProvider('typescript', {
+        tokenize: () => ({ endState: {}, tokens: [] }),
+      })
+    })
+    vi.doMock('shiki', () => ({ createHighlighter }))
+    vi.doMock('@shikijs/monaco', () => ({ shikiToMonaco }))
+    vi.doMock('../src/monaco-shim', () => {
+      const editor = { defineTheme: vi.fn(), setTheme: vi.fn(), create: vi.fn() }
+      const languages = {
+        getLanguages: () => [],
+        register: vi.fn(),
+        setTokensProvider: vi.fn(() => ({ dispose() {} })),
+      }
+      return { default: { editor, languages }, editor, languages, Range: class {} }
+    })
+
+    const { registerMonacoThemes } = await import('../src/utils/registerMonacoThemes')
+    await registerMonacoThemes(
+      ['vitesse-dark', 'vitesse-light'],
+      ['typescript', 'plaintext'],
+    )
+    await registerMonacoThemes(['vitesse-dark'], ['typescript', 'plaintext'])
+
+    expect(createHighlighter).toHaveBeenCalledTimes(1)
+    expect(shikiToMonaco).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the JavaScript regex engine by default to avoid loading Shiki WASM', async () => {
+    vi.resetModules()
+
+    const engine = { kind: 'javascript-regex' }
+    const createJavaScriptRegexEngine = vi.fn(() => engine)
+    const createHighlighter = vi.fn(async () => ({}))
+    vi.doMock('shiki', () => ({ createHighlighter, createJavaScriptRegexEngine }))
+    vi.doMock('@shikijs/monaco', () => ({ shikiToMonaco: vi.fn() }))
+    vi.doMock('../src/monaco-shim', () => {
+      const editor = { defineTheme: vi.fn(), setTheme: vi.fn(), create: vi.fn() }
+      const languages = { getLanguages: () => [], register: vi.fn(), setTokensProvider: vi.fn() }
+      return { default: { editor, languages }, editor, languages, Range: class {} }
+    })
+
+    const { registerMonacoThemes } = await import('../src/utils/registerMonacoThemes')
+
+    await registerMonacoThemes(['vitesse-dark'], ['javascript'])
+
+    expect(createJavaScriptRegexEngine).toHaveBeenCalledTimes(1)
+    expect(createHighlighter).toHaveBeenCalledWith({
+      themes: ['vitesse-dark'],
+      langs: ['javascript'],
+      engine,
+    })
+  })
+
   it('re-registers when themes array is mutated in place', async () => {
     vi.resetModules()
 
@@ -72,6 +179,33 @@ describe('registerMonacoThemes', () => {
     await registerMonacoThemes(['vitesse-dark', 'vitesse-light'], ['javascript'])
     clearHighlighterCache()
     await registerMonacoThemes(['vitesse-dark', 'vitesse-light'], ['javascript'])
+
+    expect(createHighlighter).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries shared highlighter creation after a transient failure', async () => {
+    vi.resetModules()
+
+    const createHighlighter = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary highlighter failure'))
+      .mockResolvedValue({
+        loadTheme: vi.fn(async () => undefined),
+        loadLanguage: vi.fn(async () => undefined),
+      })
+    vi.doMock('shiki', () => ({ createHighlighter }))
+    vi.doMock('@shikijs/monaco', () => ({ shikiToMonaco: vi.fn() }))
+    vi.doMock('../src/monaco-shim', () => {
+      const editor = { defineTheme: vi.fn(), setTheme: vi.fn(), create: vi.fn() }
+      const languages = { getLanguages: () => [], register: vi.fn(), setTokensProvider: vi.fn() }
+      return { default: { editor, languages }, editor, languages, Range: class {} }
+    })
+
+    const { registerMonacoThemes } = await import('../src/utils/registerMonacoThemes')
+
+    await expect(registerMonacoThemes(['vitesse-dark'], ['javascript']))
+      .rejects.toThrow('temporary highlighter failure')
+    await expect(registerMonacoThemes(['vitesse-dark'], ['javascript']))
+      .resolves.toBeDefined()
 
     expect(createHighlighter).toHaveBeenCalledTimes(2)
   })
@@ -197,6 +331,75 @@ describe('registerMonacoThemes', () => {
       delete (globalThis as any).__STREAM_MONACO_PERF__
       delete (globalThis as any).__STREAM_MONACO_ENABLE_INTERNAL_PERF_HOOKS__
     }
+  })
+
+  it('does not install a Shiki provider that fails during initial tokenization', async () => {
+    vi.resetModules()
+
+    let installedProvider: any
+    const createHighlighter = vi.fn(async () => ({}))
+    vi.doMock('shiki', () => ({ createHighlighter }))
+    vi.doMock('@shikijs/monaco', () => ({
+      shikiToMonaco: vi.fn((_highlighter, monacoProxy) => {
+        monacoProxy.languages.setTokensProvider('javascript', {
+          getInitialState() {
+            return {}
+          },
+          tokenize() {
+            throw new TypeError("Cannot read properties of null (reading 'compileAG')")
+          },
+        })
+      }),
+    }))
+    vi.doMock('../src/monaco-shim', () => {
+      const editor = { defineTheme: vi.fn(), setTheme: vi.fn(), create: vi.fn() }
+      const languages = {
+        getLanguages: () => [],
+        register: vi.fn(),
+        setTokensProvider: vi.fn((_lang, provider) => {
+          installedProvider = provider
+        }),
+      }
+      return { default: { editor, languages }, editor, languages, Range: class {} }
+    })
+
+    const { registerMonacoThemes } = await import('../src/utils/registerMonacoThemes')
+    await registerMonacoThemes(['vitesse-dark'], ['javascript'])
+
+    expect(installedProvider).toBeUndefined()
+  })
+
+  it('retries installing a Shiki provider after initial tokenization fails', async () => {
+    vi.resetModules()
+
+    let attempt = 0
+    const setTokensProvider = vi.fn()
+    const createHighlighter = vi.fn(async () => ({}))
+    const shikiToMonaco = vi.fn((_highlighter, monacoProxy) => {
+      attempt++
+      monacoProxy.languages.setTokensProvider('javascript', {
+        getInitialState: () => ({}),
+        tokenize() {
+          if (attempt === 1)
+            throw new TypeError("Cannot read properties of null (reading 'compileAG')")
+          return { endState: {}, tokens: [{ startIndex: 0, scopes: 'source.js' }] }
+        },
+      })
+    })
+    vi.doMock('shiki', () => ({ createHighlighter }))
+    vi.doMock('@shikijs/monaco', () => ({ shikiToMonaco }))
+    vi.doMock('../src/monaco-shim', () => {
+      const editor = { defineTheme: vi.fn(), setTheme: vi.fn(), create: vi.fn() }
+      const languages = { getLanguages: () => [], register: vi.fn(), setTokensProvider }
+      return { default: { editor, languages }, editor, languages, Range: class {} }
+    })
+
+    const { registerMonacoThemes } = await import('../src/utils/registerMonacoThemes')
+    await registerMonacoThemes(['vitesse-dark'], ['javascript'])
+    await registerMonacoThemes(['vitesse-dark'], ['javascript'])
+
+    expect(shikiToMonaco).toHaveBeenCalledTimes(2)
+    expect(setTokensProvider).toHaveBeenCalledOnce()
   })
 
   it('records theme registration timing when the perf hook is present', async () => {

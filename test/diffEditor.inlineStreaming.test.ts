@@ -594,8 +594,10 @@ describe('DiffEditorManager inline streaming updates', () => {
   it('does not recreate identical inline fallback delete zones', async () => {
     const manager = await createManager({ renderSideBySide: false })
     const originalDocument = (globalThis as any).document
+    let createdElementCount = 0
     ;(globalThis as any).document = {
       createElement() {
+        createdElementCount++
         return {
           className: '',
           style: {} as Record<string, string>,
@@ -651,6 +653,7 @@ describe('DiffEditorManager inline streaming updates', () => {
 
       expect(addedZones).toHaveLength(1)
       expect(removedZones).toHaveLength(0)
+      expect(createdElementCount).toBe(3)
       manager.cleanup()
     }
     finally {
