@@ -20,7 +20,7 @@ import {
   revealEditorLine,
 } from '../src/core/diffViewport'
 
-function createCodeEditor(lineCount: number, scrollHeight: number, lineHeight = 20) {
+function createCodeEditor(lineCount: number, scrollHeight: number, lineHeight = 20, contentHeight = scrollHeight) {
   return {
     getModel() {
       return {
@@ -34,6 +34,9 @@ function createCodeEditor(lineCount: number, scrollHeight: number, lineHeight = 
     },
     getScrollHeight() {
       return scrollHeight
+    },
+    getContentHeight() {
+      return contentHeight
     },
     revealLine: vi.fn(),
     revealLineInCenter: vi.fn(),
@@ -56,6 +59,25 @@ describe('diffViewport helpers', () => {
 
     expect(computeDiffRawHeight({ diffEditorView, maxHeightValue: 180 })).toBe(180)
     expect(computeDiffRawHeight({ diffEditorView, maxHeightValue: 260 })).toBe(220)
+  })
+
+  it('computeDiffRawHeight respects explicit zero editor padding', () => {
+    const originalEditor = createCodeEditor(5, 150, 20, 100)
+    const modifiedEditor = createCodeEditor(5, 150, 20, 100)
+    const diffEditorView = {
+      getOriginalEditor() {
+        return originalEditor as any
+      },
+      getModifiedEditor() {
+        return modifiedEditor as any
+      },
+    } as any
+
+    expect(computeDiffRawHeight({
+      diffEditorView,
+      editorPadding: { top: 0, bottom: 0 },
+      maxHeightValue: 260,
+    })).toBe(100)
   })
 
   it('computeDiffHeight preserves inline streaming floor', () => {

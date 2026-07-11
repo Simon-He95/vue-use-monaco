@@ -223,6 +223,7 @@ export class DiffEditorManager {
   private diffPresentationObserver: MutationObserver | null = null
   private fallbackOriginalDecorationIds: string[] = []
   private fallbackModifiedDecorationIds: string[] = []
+  private fallbackDiffDecorationSignature: string | null = null
   private fallbackInlineDeletedZoneIds: string[] = []
   private fallbackInlineDeletedZoneSignature: string | null = null
   private inlineDiffStreamingPresentationActive = false
@@ -256,6 +257,7 @@ export class DiffEditorManager {
 
   private cancelRafs() {
     this.rafScheduler.cancel('sync-diff-presentation')
+    this.rafScheduler.cancel('sync-diff-presentation-follow-up')
     this.rafScheduler.cancel('sync-diff-layout')
     this.rafScheduler.cancel('capture-diff-unchanged-state')
     this.rafScheduler.cancel('restore-diff-unchanged-state')
@@ -266,6 +268,7 @@ export class DiffEditorManager {
     this.rafScheduler.cancel('maybe-resume-diff')
     this.rafScheduler.cancel('content-size-change-diff')
     this.rafScheduler.cancel('sync-last-known-modified')
+    this.rafScheduler.cancel('reposition-diff-hunk-actions')
     this.rafScheduler.cancel('diff')
     this.rafScheduler.cancel('appendDiff')
   }
@@ -428,6 +431,7 @@ export class DiffEditorManager {
   }
 
   private disposeDiffHunkInteractions() {
+    this.rafScheduler.cancel('reposition-diff-hunk-actions')
     if (this.diffHunkHideTimer != null) {
       clearTimeout(this.diffHunkHideTimer)
       this.diffHunkHideTimer = null
@@ -467,28 +471,65 @@ export class DiffEditorManager {
     if (n === 0 && m === 0)
       return []
 
+    let commonPrefix = 0
+    while (
+      commonPrefix < n
+      && commonPrefix < m
+      && original[commonPrefix] === modified[commonPrefix]
+    ) {
+      commonPrefix++
+    }
+
+    let commonSuffix = 0
+    while (
+      commonSuffix < n - commonPrefix
+      && commonSuffix < m - commonPrefix
+      && original[n - commonSuffix - 1] === modified[m - commonSuffix - 1]
+    ) {
+      commonSuffix++
+    }
+
+    const originalMiddle = original.slice(commonPrefix, n - commonSuffix)
+    const modifiedMiddle = modified.slice(commonPrefix, m - commonSuffix)
+    const originalMiddleCount = originalMiddle.length
+    const modifiedMiddleCount = modifiedMiddle.length
+    if (originalMiddleCount === 0 && modifiedMiddleCount === 0)
+      return []
+
+    const toLineChange = (
+      originalStart: number,
+      originalEnd: number,
+      modifiedStart: number,
+      modifiedEnd: number,
+    ): monaco.editor.ILineChange => ({
+      originalStartLineNumber: originalStart,
+      originalEndLineNumber: originalEnd,
+      modifiedStartLineNumber: modifiedStart,
+      modifiedEndLineNumber: modifiedEnd,
+      charChanges: [],
+    })
+
     // Bound worst-case CPU/memory for fallback mode.
     const maxCells = 1_500_000
-    if ((n + 1) * (m + 1) > maxCells) {
+    if ((originalMiddleCount + 1) * (modifiedMiddleCount + 1) > maxCells) {
       return originalModel.getValue() === modifiedModel.getValue()
         ? []
         : [
-            {
-              originalStartLineNumber: 1,
-              originalEndLineNumber: n,
-              modifiedStartLineNumber: 1,
-              modifiedEndLineNumber: m,
-              charChanges: [],
-            },
+            toLineChange(
+              commonPrefix + 1,
+              commonPrefix + originalMiddleCount,
+              commonPrefix + 1,
+              commonPrefix + modifiedMiddleCount,
+            ),
           ]
     }
 
-    const cols = m + 1
-    const dp = new Uint32Array((n + 1) * (m + 1))
-    for (let i = 1; i <= n; i++) {
-      for (let j = 1; j <= m; j++) {
+    const cols = modifiedMiddleCount + 1
+    const dp = new Uint32Array((originalMiddleCount + 1) * (modifiedMiddleCount + 1))
+    for (let i = 1; i <= originalMiddleCount; i++) {
+      for (let j = 1; j <= modifiedMiddleCount; j++) {
         const idx = i * cols + j
-        if (original[i - 1] === modified[j - 1]) {
+        if (originalMiddle[i - 1] === modifiedMiddle[j - 1]) {
           dp[idx] = dp[(i - 1) * cols + (j - 1)] + 1
         }
         else {
@@ -500,10 +541,10 @@ export class DiffEditorManager {
     }
 
     const matches: Array<{ o: number, m: number }> = []
-    let i = n
-    let j = m
+    let i = originalMiddleCount
+    let j = modifiedMiddleCount
     while (i > 0 && j > 0) {
-      if (original[i - 1] === modified[j - 1]) {
+      if (originalMiddle[i - 1] === modifiedMiddle[j - 1]) {
         matches.push({ o: i, m: j })
         i--
         j--
@@ -517,7 +558,7 @@ export class DiffEditorManager {
       }
     }
     matches.reverse()
-    matches.push({ o: n + 1, m: m + 1 })
+    matches.push({ o: originalMiddleCount + 1, m: modifiedMiddleCount + 1 })
 
     const lineChanges: monaco.editor.ILineChange[] = []
     let prevO = 1
@@ -530,13 +571,12 @@ export class DiffEditorManager {
       const hasOriginal = oStart <= oEnd
       const hasModified = mStart <= mEnd
       if (hasOriginal || hasModified) {
-        lineChanges.push({
-          originalStartLineNumber: hasOriginal ? oStart : oStart,
-          originalEndLineNumber: hasOriginal ? oEnd : oStart - 1,
-          modifiedStartLineNumber: hasModified ? mStart : mStart,
-          modifiedEndLineNumber: hasModified ? mEnd : mStart - 1,
-          charChanges: [],
-        })
+        lineChanges.push(toLineChange(
+          commonPrefix + oStart,
+          commonPrefix + (hasOriginal ? oEnd : oStart - 1),
+          commonPrefix + mStart,
+          commonPrefix + (hasModified ? mEnd : mStart - 1),
+        ))
       }
       prevO = match.o + 1
       prevM = match.m + 1
@@ -549,12 +589,24 @@ export class DiffEditorManager {
       return []
 
     const nativeLineChanges = this.diffEditorView.getLineChanges()
-    if (nativeLineChanges && this.hasFreshNativeDiffResult()) {
-      this.diffHunkFallbackLineChanges = []
-      this.diffHunkFallbackVersions = null
-      return nativeLineChanges
+    if (
+      nativeLineChanges
+      && this.originalModel
+      && this.modifiedModel
+      && this.hasFreshNativeDiffResult()
+    ) {
+      if (
+        nativeLineChanges.length > 0
+        || this.originalModel.getValue() === this.modifiedModel.getValue()
+      ) {
+        return nativeLineChanges
+      }
     }
 
+    return this.getFallbackLineChanges()
+  }
+
+  private getFallbackLineChanges() {
     if (!this.originalModel || !this.modifiedModel)
       return []
 
@@ -597,6 +649,25 @@ export class DiffEditorManager {
     )
   }
 
+  private setDomClass(node: Element, className: string, enabled: boolean) {
+    const classList = node.classList
+    const hasClass = classList.contains(className)
+    if (hasClass === enabled)
+      return
+    if (
+      (typeof classList.add !== 'function'
+        || typeof classList.remove !== 'function')
+      && typeof classList.toggle === 'function'
+    ) {
+      classList.toggle(className, enabled)
+      return
+    }
+    if (enabled && !hasClass)
+      classList.add(className)
+    else if (!enabled && hasClass)
+      classList.remove(className)
+  }
+
   private syncFullLineInlineDiffDecorations() {
     if (!this.lastContainer)
       return
@@ -628,7 +699,7 @@ export class DiffEditorManager {
           && rect.left <= line.left + 1
           && rectRight >= line.left + line.width - 1,
         )
-        node.classList.toggle(className, isFullLine)
+        this.setDomClass(node, className, isFullLine)
       }
     }
 
@@ -644,9 +715,143 @@ export class DiffEditorManager {
     )
   }
 
+  private syncNativeInlineDeletePositions() {
+    if (!this.lastContainer || !this.isDiffInlineMode())
+      return
+
+    const wrappers = Array.from(
+      this.lastContainer.querySelectorAll?.(
+        '.editor.modified .view-zones .view-lines.line-delete',
+      ) ?? [],
+    ).filter((node): node is HTMLElement => node instanceof HTMLElement)
+
+    if (wrappers.length === 0)
+      return
+
+    const marginRectsByZoneId = new Map<string, DOMRect>()
+    const marginWrappers = Array.from(
+      this.lastContainer.querySelectorAll?.(
+        '.editor.modified .margin-view-zones [monaco-view-zone]',
+      ) ?? [],
+    ).filter((node): node is HTMLElement => {
+      return (
+        node instanceof HTMLElement
+        && (
+          (typeof node.matches === 'function' && node.matches('.inline-deleted-margin-view-zone'))
+          || !!node.querySelector('.inline-deleted-margin-view-zone')
+        )
+      )
+    })
+    for (const marginWrapper of marginWrappers) {
+      const id = marginWrapper.getAttribute('monaco-view-zone')
+      const rect = marginWrapper.getBoundingClientRect()
+      if (id && rect.width > 0 && rect.height > 0)
+        marginRectsByZoneId.set(id, rect)
+    }
+
+    const mainLineRects = Array.from(
+      this.lastContainer.querySelectorAll?.(
+        '.editor.modified .lines-content > .view-lines:not(.line-delete) > .view-line',
+      ) ?? [],
+    )
+      .filter((node): node is HTMLElement => node instanceof HTMLElement)
+      .map(node => node.getBoundingClientRect())
+      .filter(rect => rect.width > 0 && rect.height > 0)
+    const lineHeight = mainLineRects.find(rect => rect.height > 0)?.height ?? 20
+    const offsetProperty = '--stream-monaco-inline-delete-vertical-offset'
+    const applyWrapperState = (
+      wrapper: HTMLElement,
+      positioned: boolean,
+      shifted: boolean,
+      offset: string | null,
+    ) => {
+      const setClass = (className: string, enabled: boolean) => {
+        const hasClass = wrapper.classList.contains(className)
+        if (enabled && !hasClass)
+          wrapper.classList.add(className)
+        else if (!enabled && hasClass)
+          wrapper.classList.remove(className)
+      }
+      const currentOffset = typeof wrapper.style.getPropertyValue === 'function'
+        ? wrapper.style.getPropertyValue(offsetProperty)
+        : (
+            wrapper.style as unknown as {
+              values?: Map<string, string>
+            }
+          ).values?.get(offsetProperty) ?? ''
+
+      setClass('stream-monaco-inline-delete-positioned', positioned)
+      setClass('stream-monaco-inline-delete-shifted', shifted)
+      if (offset == null) {
+        if (currentOffset)
+          wrapper.style.removeProperty(offsetProperty)
+      }
+      else if (currentOffset !== offset) {
+        wrapper.style.setProperty(offsetProperty, offset)
+      }
+    }
+
+    for (const wrapper of wrappers) {
+      const rect = wrapper.getBoundingClientRect()
+      if (!(rect.width > 0) || !(rect.height > 0)) {
+        applyWrapperState(wrapper, false, false, null)
+        continue
+      }
+
+      const wrapperZoneId = typeof wrapper.getAttribute === 'function'
+        ? wrapper.getAttribute('monaco-view-zone')
+        : null
+      const marginRect = wrapperZoneId
+        ? marginRectsByZoneId.get(wrapperZoneId)
+        : undefined
+      if (marginRect && Math.abs(marginRect.top - rect.top) > 1) {
+        const verticalOffset = marginRect.top - rect.top
+        const targetTop = rect.top + verticalOffset
+        const targetBottom = rect.bottom + verticalOffset
+        const targetOverlapsMainLine = mainLineRects.some(line =>
+          Math.max(targetTop, line.top) < Math.min(targetBottom, line.bottom),
+        )
+        if (!targetOverlapsMainLine) {
+          applyWrapperState(wrapper, true, true, `${verticalOffset}px`)
+          continue
+        }
+      }
+
+      const overlapsMainLine = mainLineRects.some(line =>
+        line.top >= rect.top - 1 && line.top < rect.bottom - 1,
+      )
+      if (!overlapsMainLine) {
+        applyWrapperState(wrapper, true, false, null)
+        continue
+      }
+
+      const targetTop = rect.top - lineHeight
+      const targetBottom = rect.bottom - lineHeight
+      const targetOccupied = mainLineRects.some(line =>
+        line.top >= targetTop - 1 && line.top < targetBottom - 1,
+      )
+      if (targetOccupied) {
+        applyWrapperState(wrapper, false, false, null)
+        continue
+      }
+
+      applyWrapperState(wrapper, true, true, `${-lineHeight}px`)
+    }
+  }
+
   private scheduleSyncDiffPresentationDecorations() {
     this.rafScheduler.schedule('sync-diff-presentation', () => {
       this.syncDiffPresentationDecorations()
+    })
+  }
+
+  private scheduleSyncDiffPresentationDecorationsFollowUp() {
+    if (typeof requestAnimationFrame !== 'function')
+      return
+    this.rafScheduler.schedule('sync-diff-presentation-follow-up', () => {
+      this.rafScheduler.schedule('sync-diff-presentation-follow-up', () => {
+        this.scheduleSyncDiffPresentationDecorations()
+      })
     })
   }
 
@@ -674,6 +879,7 @@ export class DiffEditorManager {
     }
 
     this.clearFallbackInlineDeletedZones()
+    this.fallbackDiffDecorationSignature = null
   }
 
   private clearFallbackInlineDeletedZones() {
@@ -694,6 +900,13 @@ export class DiffEditorManager {
     this.fallbackInlineDeletedZoneSignature = null
   }
 
+  private originalLineNumberText(change: monaco.editor.ILineChange) {
+    return Array.from(
+      { length: change.originalEndLineNumber - change.originalStartLineNumber + 1 },
+      (_, offset) => String(change.originalStartLineNumber + offset),
+    ).join('\n')
+  }
+
   private clearFallbackInlineDeletedZoneWrapperContent() {
     const querySelectorAll
       = typeof (this.lastContainer as {
@@ -709,8 +922,9 @@ export class DiffEditorManager {
         '.stream-monaco-fallback-inline-delete-zone[data-stream-monaco-native-wrapper="true"], .stream-monaco-fallback-inline-delete-margin[data-stream-monaco-native-wrapper="true"]',
       ) ?? [],
     )
-    for (const node of nodes)
+    for (const node of nodes) {
       node.parentElement?.removeChild(node)
+    }
   }
 
   private clearInlineDiffStreamingPresentationIdleTimer() {
@@ -771,6 +985,7 @@ export class DiffEditorManager {
     model: monaco.editor.ITextModel,
     lineText: string,
     tabSize: number | undefined,
+    inlineRanges: Array<{ start: number, end: number }> = [],
   ) {
     const language = model.getLanguageId?.()
     const colorize = (monaco.editor as typeof monaco.editor & {
@@ -783,15 +998,138 @@ export class DiffEditorManager {
     if (!language || typeof colorize !== 'function')
       return
 
-    const signature = `${language}:${lineText}`
+    const signature = `${language}:${lineText}:${inlineRanges.map(range => `${range.start}-${range.end}`).join(',')}`
+    if (lineNode.dataset.streamMonacoColorizeSignature === signature)
+      return
     lineNode.dataset.streamMonacoColorizeSignature = signature
     void colorize(lineText, language, { tabSize })
       .then((html) => {
         if (lineNode.dataset.streamMonacoColorizeSignature !== signature)
           return
-        lineNode.innerHTML = html
+        const nextHtml = this.applyInlineRangesToColorizedHtml(
+          html,
+          inlineRanges,
+          'char-delete',
+        )
+        if (lineNode.innerHTML !== nextHtml)
+          lineNode.innerHTML = nextHtml
       })
       .catch(() => {})
+  }
+
+  private getOriginalInlineRangesForLine(
+    change: monaco.editor.ILineChange,
+    lineNumber: number,
+    lineText: string,
+  ) {
+    const changes = Array.isArray(change.charChanges)
+      ? change.charChanges
+      : []
+    return changes
+      .map((charChange) => {
+        const originalStartLine = charChange.originalStartLineNumber
+        const originalEndLine = charChange.originalEndLineNumber
+        if (
+          lineNumber < originalStartLine
+          || lineNumber > originalEndLine
+        ) {
+          return null
+        }
+
+        const startColumn = lineNumber === originalStartLine
+          ? charChange.originalStartColumn
+          : 1
+        const endColumn = lineNumber === originalEndLine
+          ? charChange.originalEndColumn
+          : lineText.length + 1
+        const start = Math.max(0, startColumn - 1)
+        const end = Math.max(start, Math.min(lineText.length, endColumn - 1))
+        return end > start ? { start, end } : null
+      })
+      .filter(Boolean) as Array<{ start: number, end: number }>
+  }
+
+  private applyInlineRangesToColorizedHtml(
+    html: string,
+    ranges: Array<{ start: number, end: number }>,
+    className: string,
+  ) {
+    const normalizedRanges = ranges
+      .map(range => ({
+        start: Math.max(0, range.start),
+        end: Math.max(0, range.end),
+      }))
+      .filter(range => range.end > range.start)
+      .sort((left, right) => left.start - right.start)
+    if (!normalizedRanges.length)
+      return html
+
+    const mergedRanges: Array<{ start: number, end: number }> = []
+    for (const range of normalizedRanges) {
+      const previous = mergedRanges.at(-1)
+      if (previous && range.start <= previous.end)
+        previous.end = Math.max(previous.end, range.end)
+      else mergedRanges.push({ ...range })
+    }
+
+    let result = ''
+    let textOffset = 0
+    let rangeIndex = 0
+    let inlineSpanOpen = false
+
+    const isInlineRangeActive = () => {
+      while (
+        rangeIndex < mergedRanges.length
+        && mergedRanges[rangeIndex].end <= textOffset
+      ) {
+        rangeIndex++
+      }
+      const range = mergedRanges[rangeIndex]
+      return !!range && range.start <= textOffset && textOffset < range.end
+    }
+    const syncInlineSpan = () => {
+      const shouldOpen = isInlineRangeActive()
+      if (shouldOpen === inlineSpanOpen)
+        return
+      result += shouldOpen ? `<span class="${className}">` : '</span>'
+      inlineSpanOpen = shouldOpen
+    }
+
+    for (let index = 0; index < html.length;) {
+      if (html[index] === '<') {
+        if (inlineSpanOpen) {
+          result += '</span>'
+          inlineSpanOpen = false
+        }
+        const end = html.indexOf('>', index)
+        if (end === -1) {
+          result += html.slice(index)
+          break
+        }
+        result += html.slice(index, end + 1)
+        index = end + 1
+        continue
+      }
+      syncInlineSpan()
+      if (html[index] === '&') {
+        const end = html.indexOf(';', index)
+        if (end !== -1) {
+          result += html.slice(index, end + 1)
+          textOffset += 1
+          index = end + 1
+          syncInlineSpan()
+          continue
+        }
+      }
+      result += html[index]
+      textOffset += 1
+      index += 1
+      syncInlineSpan()
+    }
+
+    if (inlineSpanOpen)
+      result += '</span>'
+    return result
   }
 
   private getModelTabSize(model: monaco.editor.ITextModel) {
@@ -850,22 +1188,141 @@ export class DiffEditorManager {
     if (!querySelectorAll)
       return 0
 
-    const nodes = Array.from(
+    const mainLineRects = this.getModifiedMainLineRects()
+    if (mainLineRects.length === 0)
+      return 0
+    const viewWrappers = Array.from(
       querySelectorAll(
-        '.editor.modified .view-zones [monaco-view-zone], .editor.modified .margin-view-zones [monaco-view-zone]',
+        '.editor.modified .view-zones [monaco-view-zone]',
       ) ?? [],
+    ).filter((node): node is HTMLElement => {
+      return (
+        node instanceof HTMLElement
+        && (
+          (typeof node.matches === 'function' && node.matches('.view-lines.line-delete'))
+          || !!node.querySelector('.view-lines.line-delete')
+        )
+      )
+    })
+    const marginIds = new Set(
+      Array.from(
+        querySelectorAll(
+          '.editor.modified .margin-view-zones [monaco-view-zone]',
+        ) ?? [],
+      )
+        .filter((node): node is HTMLElement => {
+          return (
+            node instanceof HTMLElement
+            && (
+              (typeof node.matches === 'function' && node.matches('.inline-deleted-margin-view-zone'))
+              || !!node.querySelector('.inline-deleted-margin-view-zone')
+            )
+          )
+        })
+        .map(node => node.getAttribute('monaco-view-zone'))
+        .filter((id): id is string => !!id),
     )
 
-    return nodes.filter((node) => {
-      if (!(node instanceof HTMLElement))
-        return false
+    return viewWrappers.filter((node) => {
+      const id = node.getAttribute('monaco-view-zone')
+      const lineDeleteNode = typeof node.matches === 'function'
+        && node.matches('.view-lines.line-delete')
+        ? node
+        : node.querySelector('.view-lines.line-delete')
+      const lineDeleteClassName = lineDeleteNode instanceof HTMLElement
+        ? String(lineDeleteNode.className || '')
+        : ''
       return (
-        node.matches('.view-lines.line-delete')
-        || !!node.querySelector('.view-lines.line-delete')
-        || node.matches('.inline-deleted-margin-view-zone')
-        || !!node.querySelector('.inline-deleted-margin-view-zone')
+        !!id
+        && marginIds.has(id)
+        && lineDeleteNode instanceof HTMLElement
+        && lineDeleteClassName.split(/\s+/).includes('stream-monaco-inline-delete-positioned')
+        && this.getNativeInlineDeleteLineRects(node).length > 0
+        && !this.nativeInlineDeleteWrapperOverlapsMainLine(node, mainLineRects)
       )
     }).length
+  }
+
+  private countUnpositionedVisibleNativeInlineDeleteZoneNodes() {
+    if (!this.lastContainer)
+      return 0
+    const querySelectorAll
+      = typeof (this.lastContainer as {
+        querySelectorAll?: (selector: string) => ArrayLike<Element>
+      }).querySelectorAll === 'function'
+        ? (this.lastContainer as {
+            querySelectorAll: (selector: string) => ArrayLike<Element>
+          }).querySelectorAll.bind(this.lastContainer)
+        : null
+    if (!querySelectorAll)
+      return 0
+
+    return Array.from(
+      querySelectorAll(
+        '.editor.modified .view-zones .view-lines.line-delete',
+      ) ?? [],
+    ).filter((node): node is HTMLElement => {
+      if (!(node instanceof HTMLElement))
+        return false
+      const rect = node.getBoundingClientRect?.()
+      const style = globalThis.getComputedStyle?.(node)
+      return (
+        (rect?.width ?? 0) > 0
+        && (rect?.height ?? 0) > 0
+        && style?.display !== 'none'
+        && style?.visibility !== 'hidden'
+        && Number.parseFloat(style?.opacity || '1') > 0.01
+        && !String(node.className || '')
+          .split(/\s+/)
+          .includes('stream-monaco-inline-delete-positioned')
+      )
+    }).length
+  }
+
+  private getModifiedMainLineRects() {
+    if (!this.lastContainer)
+      return []
+
+    return Array.from(
+      this.lastContainer.querySelectorAll?.(
+        '.editor.modified .lines-content > .view-lines:not(.line-delete) > .view-line',
+      ) ?? [],
+    )
+      .filter((node): node is HTMLElement => node instanceof HTMLElement)
+      .map(node => node.getBoundingClientRect())
+      .filter(rect => rect.width > 0 && rect.height > 0)
+  }
+
+  private nativeInlineDeleteWrapperOverlapsMainLine(
+    wrapper: HTMLElement,
+    mainLineRects = this.getModifiedMainLineRects(),
+  ) {
+    if (!mainLineRects.length)
+      return false
+
+    const deleteRects = this.getNativeInlineDeleteLineRects(wrapper)
+
+    return deleteRects.some(deleteRect =>
+      mainLineRects.some(lineRect =>
+        Math.max(deleteRect.left, lineRect.left) < Math.min(deleteRect.right, lineRect.right)
+        && Math.max(deleteRect.top, lineRect.top) < Math.min(deleteRect.bottom, lineRect.bottom),
+      ),
+    )
+  }
+
+  private getNativeInlineDeleteLineRects(wrapper: HTMLElement) {
+    const lineNodes = Array.from(
+      wrapper.querySelectorAll?.(
+        typeof wrapper.matches === 'function'
+        && wrapper.matches('.view-lines.line-delete')
+          ? ':scope > .view-line'
+          : '.view-lines.line-delete > .view-line',
+      ) ?? [],
+    ).filter((node): node is HTMLElement => node instanceof HTMLElement)
+
+    return (lineNodes.length > 0 ? lineNodes : [wrapper])
+      .map(node => node.getBoundingClientRect())
+      .filter(rect => rect.width > 0 && rect.height > 0)
   }
 
   private syncFallbackInlineDeletedZones(
@@ -897,6 +1354,35 @@ export class DiffEditorManager {
     const lineHeight = modifiedEditor.getOption?.(lineHeightOption as any) ?? 20
     const originalTabSize = this.getModelTabSize(originalModel)
     const relevantChanges = lineChanges.filter(change => hasOriginalLines(change))
+    const fallbackSignature = relevantChanges
+      .map((change) => {
+        const lineCount = change.originalEndLineNumber - change.originalStartLineNumber + 1
+        const text = Array.from(
+          { length: lineCount },
+          (_, offset) => this.readModelLineContent(
+            originalModel,
+            change.originalStartLineNumber + offset,
+          ),
+        ).join('\n')
+        const anchorLine = Math.max(
+          0,
+          Math.min(
+            modifiedModel.getLineCount(),
+            (change.modifiedStartLineNumber || 1) - 1,
+          ),
+        )
+        const inlineRanges = (change.charChanges ?? [])
+          .map(charChange => [
+            charChange.originalStartLineNumber,
+            charChange.originalStartColumn,
+            charChange.originalEndLineNumber,
+            charChange.originalEndColumn,
+          ].join(':'))
+          .join(',')
+        return `${anchorLine}:${lineCount}:${text}:${inlineRanges}`
+      })
+      .join('|')
+    const mainLineRects = this.getModifiedMainLineRects()
     const nativeViewWrappers = Array.from(
       this.lastContainer?.querySelectorAll?.(
         '.editor.modified .view-zones [monaco-view-zone]',
@@ -904,7 +1390,10 @@ export class DiffEditorManager {
     ).filter((node): node is HTMLElement => {
       return (
         node instanceof HTMLElement
-        && !!node.querySelector('.view-lines.line-delete')
+        && (
+          (typeof node.matches === 'function' && node.matches('.view-lines.line-delete'))
+          || !!node.querySelector('.view-lines.line-delete')
+        )
       )
     })
     const nativeMarginWrappers = Array.from(
@@ -914,7 +1403,10 @@ export class DiffEditorManager {
     ).filter((node): node is HTMLElement => {
       return (
         node instanceof HTMLElement
-        && !!node.querySelector('.inline-deleted-margin-view-zone')
+        && (
+          (typeof node.matches === 'function' && node.matches('.inline-deleted-margin-view-zone'))
+          || !!node.querySelector('.inline-deleted-margin-view-zone')
+        )
       )
     })
 
@@ -940,9 +1432,24 @@ export class DiffEditorManager {
         marginWrapper: HTMLElement | null
       } => !!entry && Number.isFinite(entry.top))
       .sort((left, right) => left.top - right.top)
+    const nativePairsWithMargin = nativePairs
+      .filter((entry): entry is {
+        id: string
+        top: number
+        viewWrapper: HTMLElement
+        marginWrapper: HTMLElement
+      } => (
+        !!entry.marginWrapper
+        && mainLineRects.length > 0
+        && this.getNativeInlineDeleteLineRects(entry.viewWrapper).length > 0
+        && !this.nativeInlineDeleteWrapperOverlapsMainLine(
+          entry.viewWrapper,
+          mainLineRects,
+        )
+      ))
 
-    if (nativePairs.length >= relevantChanges.length && relevantChanges.length > 0) {
-      const nextSignature = nativePairs
+    if (nativePairsWithMargin.length >= relevantChanges.length && relevantChanges.length > 0) {
+      const nextSignature = nativePairsWithMargin
         .slice(0, relevantChanges.length)
         .map((pair, index) => {
           const change = relevantChanges[index]
@@ -981,44 +1488,15 @@ export class DiffEditorManager {
       }
       this.clearFallbackInlineDeletedZoneWrapperContent()
 
-      relevantChanges.forEach((change, index) => {
-        const pair = nativePairs[index]
-        const domNode = document.createElement('div')
-        domNode.className = 'stream-monaco-fallback-inline-delete-zone'
-        domNode.setAttribute('aria-hidden', 'true')
-        domNode.setAttribute('data-stream-monaco-native-wrapper', 'true')
-        modifiedEditor.applyFontInfo?.(domNode)
-
-        for (let line = change.originalStartLineNumber; line <= change.originalEndLineNumber; line++) {
-          const lineText = this.readModelLineContent(originalModel, line)
-          const lineNode = document.createElement('div')
-          lineNode.className = 'stream-monaco-fallback-inline-delete-line'
-          lineNode.textContent = lineText
-          lineNode.style.height = `${lineHeight}px`
-          lineNode.style.lineHeight = `${lineHeight}px`
-          domNode.append(lineNode)
-          this.colorizeFallbackInlineDeletedLine(
-            lineNode,
-            originalModel,
-            lineText,
-            originalTabSize,
-          )
-        }
-
-        pair.viewWrapper.append(domNode)
-
-        if (pair.marginWrapper) {
-          const marginDomNode = document.createElement('div')
-          marginDomNode.className = 'stream-monaco-fallback-inline-delete-margin'
-          marginDomNode.setAttribute('aria-hidden', 'true')
-          marginDomNode.setAttribute('data-stream-monaco-native-wrapper', 'true')
-          marginDomNode.style.height = '100%'
-          modifiedEditor.applyFontInfo?.(marginDomNode)
-          pair.marginWrapper.append(marginDomNode)
-        }
-      })
-
       this.fallbackInlineDeletedZoneSignature = nextSignature || null
+      return
+    }
+
+    if (
+      fallbackSignature
+      && this.fallbackInlineDeletedZoneSignature === fallbackSignature
+      && this.fallbackInlineDeletedZoneIds.length === relevantChanges.length
+    ) {
       return
     }
 
@@ -1037,6 +1515,11 @@ export class DiffEditorManager {
 
         for (let line = change.originalStartLineNumber; line <= change.originalEndLineNumber; line++) {
           const lineText = this.readModelLineContent(originalModel, line)
+          const inlineRanges = this.getOriginalInlineRangesForLine(
+            change,
+            line,
+            lineText,
+          )
           const lineNode = document.createElement('div')
           lineNode.className = 'stream-monaco-fallback-inline-delete-line'
           lineNode.textContent = lineText
@@ -1048,12 +1531,17 @@ export class DiffEditorManager {
             originalModel,
             lineText,
             originalTabSize,
+            inlineRanges,
           )
         }
 
         const marginDomNode = document.createElement('div')
         marginDomNode.className = 'stream-monaco-fallback-inline-delete-margin'
         marginDomNode.setAttribute('aria-hidden', 'true')
+        marginDomNode.setAttribute(
+          'data-stream-monaco-line-numbers',
+          this.originalLineNumberText(change),
+        )
         modifiedEditor.applyFontInfo?.(marginDomNode)
 
         const anchorLine = Math.max(
@@ -1072,22 +1560,6 @@ export class DiffEditorManager {
         } satisfies monaco.editor.IViewZone
       })
       .filter(Boolean) as monaco.editor.IViewZone[]
-    const nextSignature = nextZones
-      .map((zone) => {
-        const text = typeof zone.domNode?.textContent === 'string'
-          ? zone.domNode.textContent
-          : ''
-        return `${zone.afterLineNumber}:${zone.heightInLines}:${text}`
-      })
-      .join('|')
-    if (
-      nextSignature
-      && this.fallbackInlineDeletedZoneSignature === nextSignature
-      && this.fallbackInlineDeletedZoneIds.length === nextZones.length
-    ) {
-      return
-    }
-
     try {
       modifiedEditor.changeViewZones?.((accessor: {
         addZone: (zone: monaco.editor.IViewZone) => string
@@ -1098,7 +1570,7 @@ export class DiffEditorManager {
         this.fallbackInlineDeletedZoneIds = nextZones.map(zone =>
           accessor.addZone(zone))
       })
-      this.fallbackInlineDeletedZoneSignature = nextSignature || null
+      this.fallbackInlineDeletedZoneSignature = fallbackSignature || null
     }
     catch {
       this.fallbackInlineDeletedZoneIds = []
@@ -1132,9 +1604,6 @@ export class DiffEditorManager {
         marginClassName: removed
           ? 'stream-monaco-fallback-gutter-delete'
           : 'stream-monaco-fallback-gutter-insert',
-        linesDecorationsClassName: removed
-          ? 'stream-monaco-fallback-lines-delete'
-          : 'stream-monaco-fallback-lines-insert',
         lineNumberClassName: removed
           ? 'stream-monaco-fallback-line-number-delete'
           : 'stream-monaco-fallback-line-number-insert',
@@ -1150,21 +1619,44 @@ export class DiffEditorManager {
     const nativeFresh = this.hasFreshNativeDiffResult()
     const useInlineMode = this.isDiffInlineMode()
     const lineChanges = this.getEffectiveLineChanges()
+    const hasLineChanges = lineChanges.length > 0
+    const wasInlineNativeStale = useInlineMode
+      && this.lastContainer.classList.contains('stream-monaco-diff-native-stale')
+    if (wasInlineNativeStale)
+      this.lastContainer.classList.remove('stream-monaco-diff-native-stale')
+    if (useInlineMode)
+      this.syncNativeInlineDeletePositions()
+    const visualLineChanges = this.getFallbackLineChanges()
+    const inlineDeleteChangeCount
+      = useInlineMode && hasLineChanges
+        ? lineChanges.filter(change => hasOriginalLines(change)).length
+        : 0
     const nativeInlineDeleteZoneCount
       = useInlineMode
         ? this.countNativeInlineDeleteZoneNodes()
         : 0
+    const unpositionedVisibleNativeInlineDeleteZoneCount
+      = useInlineMode
+        ? this.countUnpositionedVisibleNativeInlineDeleteZoneNodes()
+        : 0
     const hasNativeInlineDeleteZoneNodes = nativeInlineDeleteZoneCount > 0
+      && unpositionedVisibleNativeInlineDeleteZoneCount === 0
     const hasNativeInlineDeleteNodes
       = useInlineMode
         && this.hasVisibleNativeInlineDeleteNodes()
     const shouldKeepInlineFallback
       = useInlineMode
-        && lineChanges.some(change => hasOriginalLines(change))
-        && !hasNativeInlineDeleteZoneNodes
+        && hasLineChanges
+        && inlineDeleteChangeCount > 0
+        && (
+          !nativeFresh
+          || nativeInlineDeleteZoneCount === 0
+          || unpositionedVisibleNativeInlineDeleteZoneCount > 0
+        )
     const useInlineStaleFallback
       = shouldKeepInlineFallback
-    this.lastContainer.classList.toggle(
+    this.setDomClass(
+      this.lastContainer,
       'stream-monaco-diff-inline-native-ready',
       useInlineMode
       && !shouldKeepInlineFallback
@@ -1184,11 +1676,16 @@ export class DiffEditorManager {
             '.line-insert, .line-delete, .gutter-insert, .gutter-delete',
           )
         )
-    this.lastContainer.classList.toggle(
+    this.setDomClass(
+      this.lastContainer,
       'stream-monaco-diff-native-stale',
-      !nativeFresh && !keepNativeDecorationsWhileStale,
+      hasLineChanges
+      && (useInlineStaleFallback || (!nativeFresh && !keepNativeDecorationsWhileStale)),
     )
+    this.syncNativeWholeLineDecorationClasses(visualLineChanges)
+    this.syncDiffLineNumberClasses(visualLineChanges)
     this.syncFullLineInlineDiffDecorations()
+    this.syncInlineDeletedMarginLineNumberLabels(lineChanges)
 
     if (nativeFresh && !shouldKeepInlineFallback) {
       this.clearFallbackDiffDecorations()
@@ -1217,19 +1714,305 @@ export class DiffEditorManager {
       )
       .filter(Boolean) as monaco.editor.IModelDeltaDecoration[]
 
-    this.fallbackOriginalDecorationIds = originalEditor.deltaDecorations(
-      this.fallbackOriginalDecorationIds,
-      originalDecorations,
-    )
-    this.fallbackModifiedDecorationIds = modifiedEditor.deltaDecorations(
-      this.fallbackModifiedDecorationIds,
-      modifiedDecorations,
-    )
+    const nextFallbackDiffDecorationSignature = lineChanges
+      .map(change => [
+        change.originalStartLineNumber,
+        change.originalEndLineNumber,
+        change.modifiedStartLineNumber,
+        change.modifiedEndLineNumber,
+      ].join(':'))
+      .join('|')
+    if (this.fallbackDiffDecorationSignature !== nextFallbackDiffDecorationSignature) {
+      this.fallbackOriginalDecorationIds = originalEditor.deltaDecorations(
+        this.fallbackOriginalDecorationIds,
+        originalDecorations,
+      )
+      this.fallbackModifiedDecorationIds = modifiedEditor.deltaDecorations(
+        this.fallbackModifiedDecorationIds,
+        modifiedDecorations,
+      )
+      this.fallbackDiffDecorationSignature = nextFallbackDiffDecorationSignature
+    }
 
     if (useInlineStaleFallback)
       this.syncFallbackInlineDeletedZones(lineChanges)
     else
       this.clearFallbackInlineDeletedZones()
+  }
+
+  private syncDiffLineNumberClasses(lineChanges: monaco.editor.ILineChange[]) {
+    if (!this.diffEditorView)
+      return
+
+    const syncPane = (
+      editor: monaco.editor.IStandaloneCodeEditor,
+      side: 'original' | 'modified',
+    ) => {
+      const editorRoot = editor.getContainerDomNode?.()
+      if (!editorRoot || typeof editorRoot.querySelectorAll !== 'function')
+        return
+
+      const nodes = Array.from(editorRoot.querySelectorAll('.line-numbers'))
+      const visualRows = Array.from(editorRoot.querySelectorAll('.lines-content > .view-lines > .view-line'))
+        .filter((node): node is HTMLElement => node instanceof HTMLElement)
+      const activeVisualClassName = side === 'original'
+        ? 'stream-monaco-line-delete-fill'
+        : 'stream-monaco-line-insert-fill'
+      const inactiveVisualClassName = side === 'original'
+        ? 'stream-monaco-line-insert-fill'
+        : 'stream-monaco-line-delete-fill'
+      const resolveVisualChanged = (lineNumberNode: Element) => {
+        if (!visualRows.length || !(lineNumberNode instanceof HTMLElement))
+          return undefined
+        const numberRect = lineNumberNode.getBoundingClientRect()
+        let nearest: { node: HTMLElement, distance: number } | null = null
+        for (const row of visualRows) {
+          const rowRect = row.getBoundingClientRect()
+          const distance = Math.abs(rowRect.top - numberRect.top)
+          if (!nearest || distance < nearest.distance)
+            nearest = { node: row, distance }
+        }
+        if (!nearest || nearest.distance > 1)
+          return false
+        if (nearest.node.classList.contains(activeVisualClassName))
+          return true
+        if (nearest.node.classList.contains(inactiveVisualClassName))
+          return false
+        return false
+      }
+      for (const node of nodes) {
+        if (!node.classList || typeof node.classList.toggle !== 'function')
+          continue
+        const lineNumber = Number.parseInt(node.textContent?.trim() || '', 10)
+        const changedByLineChanges = Number.isFinite(lineNumber) && lineChanges.some((change) => {
+          if (side === 'original') {
+            return hasOriginalLines(change)
+              && lineNumber >= change.originalStartLineNumber
+              && lineNumber <= change.originalEndLineNumber
+          }
+          return hasModifiedLines(change)
+            && lineNumber >= change.modifiedStartLineNumber
+            && lineNumber <= change.modifiedEndLineNumber
+        })
+        const visualChanged = resolveVisualChanged(node)
+        const changed = visualChanged ?? changedByLineChanges
+
+        this.setDomClass(
+          node,
+          'stream-monaco-line-number-delete',
+          side === 'original' && changed,
+        )
+        this.setDomClass(
+          node,
+          'stream-monaco-line-number-insert',
+          side === 'modified' && changed,
+        )
+        if (!changed) {
+          this.setDomClass(node, 'line-delete', false)
+          this.setDomClass(node, 'line-insert', false)
+        }
+      }
+    }
+
+    syncPane(this.diffEditorView.getOriginalEditor(), 'original')
+    syncPane(this.diffEditorView.getModifiedEditor(), 'modified')
+  }
+
+  private syncNativeWholeLineDecorationClasses(lineChanges: monaco.editor.ILineChange[]) {
+    if (!this.diffEditorView || typeof HTMLElement === 'undefined')
+      return
+
+    const syncPane = (
+      editor: monaco.editor.IStandaloneCodeEditor,
+      side: 'original' | 'modified',
+    ) => {
+      const editorRoot = editor.getContainerDomNode?.()
+      if (!editorRoot || typeof editorRoot.querySelectorAll !== 'function')
+        return
+
+      const lineNumbers = Array.from(editorRoot.querySelectorAll('.line-numbers'))
+        .filter((node): node is HTMLElement => node instanceof HTMLElement)
+        .map((node) => {
+          const lineNumber = Number.parseInt(node.textContent?.trim() || '', 10)
+          return Number.isFinite(lineNumber)
+            ? {
+                lineNumber,
+                rect: node.getBoundingClientRect(),
+                hasInsertClass: node.classList.contains('line-insert'),
+                hasDeleteClass: node.classList.contains('line-delete'),
+              }
+            : null
+        })
+        .filter(Boolean) as Array<{
+        lineNumber: number
+        rect: DOMRect
+        hasInsertClass: boolean
+        hasDeleteClass: boolean
+      }>
+      if (!lineNumbers.length)
+        return
+
+      const resolveLineNumber = (node: HTMLElement) => {
+        const rect = node.getBoundingClientRect()
+        const center = rect.top + rect.height / 2
+        let nearest: { lineNumber: number, distance: number } | null = null
+        for (const entry of lineNumbers) {
+          if (center >= entry.rect.top && center <= entry.rect.bottom)
+            return entry.lineNumber
+          const entryCenter = entry.rect.top + entry.rect.height / 2
+          const distance = Math.abs(center - entryCenter)
+          if (!nearest || distance < nearest.distance)
+            nearest = { lineNumber: entry.lineNumber, distance }
+        }
+        return nearest?.distance != null && nearest.distance <= 1
+          ? nearest.lineNumber
+          : undefined
+      }
+
+      const isChangedByLineChanges = (lineNumber: number | undefined) => {
+        if (!Number.isFinite(lineNumber))
+          return false
+        return lineChanges.some((change) => {
+          if (side === 'original') {
+            return hasOriginalLines(change)
+              && lineNumber! >= change.originalStartLineNumber
+              && lineNumber! <= change.originalEndLineNumber
+          }
+          return hasModifiedLines(change)
+            && lineNumber! >= change.modifiedStartLineNumber
+            && lineNumber! <= change.modifiedEndLineNumber
+        })
+      }
+
+      const isChanged = (
+        lineNumber: number | undefined,
+        includeNativeLineNumberClass = true,
+      ) => {
+        if (isChangedByLineChanges(lineNumber))
+          return true
+        if (!includeNativeLineNumberClass || !Number.isFinite(lineNumber))
+          return false
+        return lineNumbers.some(entry =>
+          entry.lineNumber === lineNumber
+          && (side === 'original' ? entry.hasDeleteClass : entry.hasInsertClass),
+        )
+      }
+
+      const syncNodes = (
+        selector: string,
+        activeClassName: string,
+        inactiveClassName: string,
+        includeNativeLineNumberClass = true,
+      ) => {
+        const nodes = Array.from(editorRoot.querySelectorAll(selector))
+          .filter((node): node is HTMLElement => node instanceof HTMLElement)
+        for (const node of nodes) {
+          if (
+            (activeClassName === 'gutter-insert' || activeClassName === 'gutter-delete')
+            && node.classList.contains('line-numbers')
+          ) {
+            continue
+          }
+          const changed = isChanged(
+            resolveLineNumber(node),
+            includeNativeLineNumberClass,
+          )
+          this.setDomClass(node, activeClassName, changed)
+          this.setDomClass(node, inactiveClassName, false)
+        }
+      }
+
+      const syncInlineNodes = (
+        selector: string,
+        activeClassName: string,
+        fullLineClassName: string,
+      ) => {
+        const nodes = Array.from(editorRoot.querySelectorAll(selector))
+          .filter((node): node is HTMLElement => node instanceof HTMLElement)
+        for (const node of nodes) {
+          if (isChanged(resolveLineNumber(node)))
+            continue
+          this.setDomClass(node, activeClassName, false)
+          this.setDomClass(node, fullLineClassName, false)
+        }
+      }
+
+      syncNodes(
+        '.view-overlays > div',
+        side === 'original' ? 'line-delete' : 'line-insert',
+        side === 'original' ? 'line-insert' : 'line-delete',
+      )
+      syncNodes(
+        '.lines-content > .view-lines > .view-line',
+        side === 'original'
+          ? 'stream-monaco-line-delete-fill'
+          : 'stream-monaco-line-insert-fill',
+        side === 'original'
+          ? 'stream-monaco-line-insert-fill'
+          : 'stream-monaco-line-delete-fill',
+        false,
+      )
+      for (const node of Array.from(editorRoot.querySelectorAll('.view-overlays > div > div'))) {
+        if (!(node instanceof HTMLElement))
+          continue
+        this.setDomClass(node, 'line-insert', false)
+        this.setDomClass(node, 'line-delete', false)
+      }
+      syncNodes(
+        '.margin-view-overlays > div, .margin-view-overlays > div > div',
+        side === 'original' ? 'gutter-delete' : 'gutter-insert',
+        side === 'original' ? 'gutter-insert' : 'gutter-delete',
+      )
+      syncInlineNodes(
+        side === 'original' ? '.view-overlays .char-delete' : '.view-overlays .char-insert',
+        side === 'original' ? 'char-delete' : 'char-insert',
+        side === 'original'
+          ? 'stream-monaco-full-line-inline-delete'
+          : 'stream-monaco-full-line-inline-insert',
+      )
+    }
+
+    syncPane(this.diffEditorView.getOriginalEditor(), 'original')
+    syncPane(this.diffEditorView.getModifiedEditor(), 'modified')
+  }
+
+  private syncInlineDeletedMarginLineNumberLabels(lineChanges: monaco.editor.ILineChange[]) {
+    if (!this.diffEditorView || typeof HTMLElement === 'undefined')
+      return
+
+    const editorRoot = this.diffEditorView.getModifiedEditor().getContainerDomNode?.()
+    if (!editorRoot || typeof editorRoot.querySelectorAll !== 'function')
+      return
+
+    const zones = Array.from(
+      editorRoot.querySelectorAll('.inline-deleted-margin-view-zone'),
+    ).filter((node): node is HTMLElement => node instanceof HTMLElement)
+    if (!zones.length)
+      return
+
+    const deletedChanges = lineChanges
+      .filter(hasOriginalLines)
+      .sort((a, b) => a.modifiedStartLineNumber - b.modifiedStartLineNumber)
+
+    zones.forEach((zone, index) => {
+      const change = deletedChanges[index]
+      if (!change) {
+        zone.removeAttribute('data-stream-monaco-line-number')
+        zone.removeAttribute('data-stream-monaco-line-numbers')
+        return
+      }
+
+      const lineNumbers = Array.from(
+        { length: change.originalEndLineNumber - change.originalStartLineNumber + 1 },
+        (_, offset) => String(change.originalStartLineNumber + offset),
+      ).join('\n')
+
+      zone.removeAttribute('data-stream-monaco-line-number')
+      zone.setAttribute(
+        'data-stream-monaco-line-numbers',
+        lineNumbers,
+      )
+    })
   }
 
   private disposeDiffPresentationTracking() {
@@ -1265,9 +2048,9 @@ export class DiffEditorManager {
   --stream-monaco-unchanged-fg: var(--vscode-diffEditor-unchangedRegionForeground, var(--stream-monaco-editor-fg));
   --stream-monaco-unchanged-bg: var(--vscode-diffEditor-unchangedRegionBackground, transparent);
   --stream-monaco-gutter-marker-width: 4px;
-  --stream-monaco-gutter-gap: 16px;
-  --stream-monaco-diff-code-gap: 2px;
-  --stream-monaco-diff-code-padding: 6px;
+  --stream-monaco-gutter-gap: 8px;
+  --stream-monaco-diff-code-gap: 7.8px;
+  --stream-monaco-diff-code-padding: 0px;
   --stream-monaco-widget-shadow: var(--vscode-widget-shadow, rgb(15 23 42 / 26%));
   --stream-monaco-focus: var(--vscode-focusBorder, color-mix(in srgb, var(--stream-monaco-editor-fg) 56%, transparent));
   --stream-monaco-frame-radius: 20px;
@@ -1277,14 +2060,22 @@ export class DiffEditorManager {
   --stream-monaco-pane-divider: var(--stream-monaco-panel-border);
   --stream-monaco-line-number: color-mix(in srgb, var(--stream-monaco-editor-fg) 34%, transparent);
   --stream-monaco-line-number-active: color-mix(in srgb, var(--stream-monaco-editor-fg) 46%, transparent);
-  --stream-monaco-line-number-left: calc(
-    var(--stream-monaco-gutter-marker-width) + var(--stream-monaco-gutter-gap)
+  --stream-monaco-line-number-bg: var(--stream-monaco-editor-bg);
+  --stream-monaco-line-number-left: var(--stream-monaco-gutter-marker-width);
+  --stream-monaco-line-number-width: 15.6px;
+  --stream-monaco-line-number-padding-left: 15.6px;
+  --stream-monaco-line-number-padding-right: 7.8px;
+  --stream-monaco-line-number-box-width: calc(
+    var(--stream-monaco-line-number-padding-left) +
+      var(--stream-monaco-line-number-width) +
+      var(--stream-monaco-line-number-padding-right)
   );
-  --stream-monaco-line-number-width: 36px;
-  --stream-monaco-line-number-align: center;
+  --stream-monaco-line-number-gap-to-code: var(--stream-monaco-diff-code-gap);
+  --stream-monaco-line-number-align: right;
   --stream-monaco-original-margin-width: calc(
     var(--stream-monaco-line-number-left) +
-      var(--stream-monaco-line-number-width)
+      var(--stream-monaco-line-number-box-width)
+      + var(--stream-monaco-line-number-gap-to-code)
   );
   --stream-monaco-original-scrollable-left: var(
     --stream-monaco-original-margin-width
@@ -1294,7 +2085,8 @@ export class DiffEditorManager {
   );
   --stream-monaco-modified-margin-width: calc(
     var(--stream-monaco-line-number-left) +
-      var(--stream-monaco-line-number-width)
+      var(--stream-monaco-line-number-box-width)
+      + var(--stream-monaco-line-number-gap-to-code)
   );
   --stream-monaco-modified-scrollable-left: var(
     --stream-monaco-modified-margin-width
@@ -1329,9 +2121,7 @@ export class DiffEditorManager {
   --stream-monaco-added-border: color-mix(in srgb, var(--stream-monaco-added-fg) 24%, transparent);
   --stream-monaco-added-outline: var(--stream-monaco-added-border);
   --stream-monaco-added-inline-border: var(--stream-monaco-added-border);
-  --stream-monaco-added-line-shadow:
-    inset 4px 0 0 var(--stream-monaco-added-fg),
-    inset 0 0 0 1px var(--stream-monaco-added-outline);
+  --stream-monaco-added-line-shadow: none;
   --stream-monaco-added-line-fill:
     linear-gradient(
       90deg,
@@ -1350,9 +2140,7 @@ export class DiffEditorManager {
   --stream-monaco-removed-border: color-mix(in srgb, var(--stream-monaco-removed-fg) 24%, transparent);
   --stream-monaco-removed-outline: var(--stream-monaco-removed-border);
   --stream-monaco-removed-inline-border: var(--stream-monaco-removed-border);
-  --stream-monaco-removed-line-shadow:
-    inset 4px 0 0 var(--stream-monaco-removed-fg),
-    inset 0 0 0 1px var(--stream-monaco-removed-outline);
+  --stream-monaco-removed-line-shadow: none;
   --stream-monaco-removed-line-fill:
     linear-gradient(
       90deg,
@@ -1400,9 +2188,7 @@ export class DiffEditorManager {
   --stream-monaco-added-border: color-mix(in srgb, var(--stream-monaco-added-fg) 32%, transparent);
   --stream-monaco-added-outline: color-mix(in srgb, var(--stream-monaco-added-fg) 20%, transparent);
   --stream-monaco-added-inline-border: color-mix(in srgb, var(--stream-monaco-added-fg) 26%, transparent);
-  --stream-monaco-added-line-shadow:
-    inset 4px 0 0 var(--stream-monaco-added-fg),
-    inset 0 0 0 1px var(--stream-monaco-added-outline);
+  --stream-monaco-added-line-shadow: none;
   --stream-monaco-added-line-fill:
     linear-gradient(
       90deg,
@@ -1421,9 +2207,7 @@ export class DiffEditorManager {
   --stream-monaco-removed-border: color-mix(in srgb, var(--stream-monaco-removed-fg) 32%, transparent);
   --stream-monaco-removed-outline: color-mix(in srgb, var(--stream-monaco-removed-fg) 20%, transparent);
   --stream-monaco-removed-inline-border: color-mix(in srgb, var(--stream-monaco-removed-fg) 26%, transparent);
-  --stream-monaco-removed-line-shadow:
-    inset 4px 0 0 var(--stream-monaco-removed-fg),
-    inset 0 0 0 1px var(--stream-monaco-removed-outline);
+  --stream-monaco-removed-line-shadow: none;
   --stream-monaco-removed-line-fill:
     linear-gradient(
       90deg,
@@ -1524,67 +2308,175 @@ export class DiffEditorManager {
   display: none !important;
 }
 .stream-monaco-diff-root .monaco-diff-editor .gutter-insert {
-  background: var(--stream-monaco-added-gutter) !important;
+  background: var(--stream-monaco-added-gutter), var(--stream-monaco-added-line-fill) !important;
 }
 .stream-monaco-diff-root .monaco-diff-editor .gutter-delete,
 .stream-monaco-diff-root .monaco-editor .inline-deleted-margin-view-zone {
-  background: var(--stream-monaco-removed-gutter) !important;
+  background: var(--stream-monaco-removed-gutter), var(--stream-monaco-removed-line-fill) !important;
+}
+.stream-monaco-diff-root .monaco-editor .inline-deleted-margin-view-zone[data-stream-monaco-line-numbers]::after,
+.stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-inline-delete-margin[data-stream-monaco-line-numbers]::after {
+  content: attr(data-stream-monaco-line-numbers);
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: var(--stream-monaco-line-number-left) !important;
+  width: var(--stream-monaco-line-number-width) !important;
+  height: 100%;
+  box-sizing: content-box !important;
+  padding-left: var(--stream-monaco-line-number-padding-left) !important;
+  padding-right: var(--stream-monaco-line-number-padding-right) !important;
+  background: var(--stream-monaco-removed-line-fill) !important;
+  color: var(--stream-monaco-removed-fg) !important;
+  box-shadow: inset -1px 0 var(--stream-monaco-gutter-guide) !important;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--vscode-editor-line-height, 20px);
+  white-space: pre;
+  overflow: hidden;
+  text-align: var(--stream-monaco-line-number-align) !important;
+  user-select: none;
+  pointer-events: none;
 }
 .stream-monaco-diff-root .monaco-editor .line-insert,
-.stream-monaco-diff-root .monaco-diff-editor .line-insert {
+.stream-monaco-diff-root .monaco-diff-editor .line-insert,
+.stream-monaco-diff-root .monaco-editor .view-overlays > div:has(> .cdr.line-insert[style*="left:0"][style*="width:100%"]),
+.stream-monaco-diff-root .monaco-diff-editor .view-overlays > div:has(> .cdr.line-insert[style*="left:0"][style*="width:100%"]),
+.stream-monaco-diff-root .monaco-diff-editor .editor.modified .view-lines .view-line.stream-monaco-line-insert-fill {
   background: var(--stream-monaco-added-line-fill) !important;
   border: 0 !important;
   border-radius: 0 !important;
   box-shadow: var(--stream-monaco-added-line-shadow);
 }
 .stream-monaco-diff-root .monaco-editor .line-delete,
-.stream-monaco-diff-root .monaco-diff-editor .line-delete {
+.stream-monaco-diff-root .monaco-diff-editor .line-delete,
+.stream-monaco-diff-root .monaco-editor .view-overlays > div:has(> .cdr.line-delete[style*="left:0"][style*="width:100%"]),
+.stream-monaco-diff-root .monaco-diff-editor .view-overlays > div:has(> .cdr.line-delete[style*="left:0"][style*="width:100%"]),
+.stream-monaco-diff-root .monaco-diff-editor .editor.original .view-lines .view-line.stream-monaco-line-delete-fill {
   background: var(--stream-monaco-removed-line-fill) !important;
   border: 0 !important;
   border-radius: 0 !important;
   box-shadow: var(--stream-monaco-removed-line-shadow);
 }
+.stream-monaco-diff-root .monaco-editor .line-insert:not(.line-numbers) .view-line,
+.stream-monaco-diff-root .monaco-diff-editor .line-insert:not(.line-numbers) .view-line,
+.stream-monaco-diff-root .monaco-editor .line-delete:not(.line-numbers) .view-line,
+.stream-monaco-diff-root .monaco-diff-editor .line-delete:not(.line-numbers) .view-line {
+  color: var(--stream-monaco-editor-fg) !important;
+}
 .stream-monaco-diff-root .monaco-editor .view-line,
 .stream-monaco-diff-root .monaco-diff-editor .view-line {
   box-sizing: border-box;
-  padding-left: calc(var(--stream-monaco-diff-code-gap) + var(--stream-monaco-diff-code-padding)) !important;
+  padding-left: var(--stream-monaco-diff-code-padding) !important;
 }
 .stream-monaco-diff-root .monaco-editor .line-insert:not(.line-numbers),
 .stream-monaco-diff-root .monaco-diff-editor .line-insert:not(.line-numbers),
 .stream-monaco-diff-root .monaco-editor .line-delete:not(.line-numbers),
 .stream-monaco-diff-root .monaco-diff-editor .line-delete:not(.line-numbers),
+.stream-monaco-diff-root .monaco-editor .view-overlays > div:has(> .cdr.line-insert[style*="left:0"][style*="width:100%"]),
+.stream-monaco-diff-root .monaco-diff-editor .view-overlays > div:has(> .cdr.line-insert[style*="left:0"][style*="width:100%"]),
+.stream-monaco-diff-root .monaco-editor .view-overlays > div:has(> .cdr.line-delete[style*="left:0"][style*="width:100%"]),
+.stream-monaco-diff-root .monaco-diff-editor .view-overlays > div:has(> .cdr.line-delete[style*="left:0"][style*="width:100%"]),
+.stream-monaco-diff-root .monaco-diff-editor .editor.modified .view-lines .view-line.stream-monaco-line-insert-fill,
+.stream-monaco-diff-root .monaco-diff-editor .editor.original .view-lines .view-line.stream-monaco-line-delete-fill,
 .stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-line-insert,
 .stream-monaco-diff-root .monaco-diff-editor .stream-monaco-fallback-line-insert,
 .stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-line-delete,
-.stream-monaco-diff-root .monaco-diff-editor .stream-monaco-fallback-line-delete,
-.stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-inline-delete-line {
+.stream-monaco-diff-root .monaco-diff-editor .stream-monaco-fallback-line-delete {
   box-sizing: border-box;
-  margin-left: var(--stream-monaco-diff-code-gap) !important;
-  width: calc(100% - var(--stream-monaco-diff-code-gap)) !important;
+  margin-left: 0 !important;
+  width: 100% !important;
+  overflow: visible !important;
+}
+.stream-monaco-diff-root .monaco-editor .line-insert:not(.line-numbers)::before,
+.stream-monaco-diff-root .monaco-diff-editor .line-insert:not(.line-numbers)::before,
+.stream-monaco-diff-root .monaco-editor .view-overlays > div:has(> .cdr.line-insert[style*="left:0"][style*="width:100%"])::before,
+.stream-monaco-diff-root .monaco-diff-editor .view-overlays > div:has(> .cdr.line-insert[style*="left:0"][style*="width:100%"])::before,
+.stream-monaco-diff-root .monaco-diff-editor .editor.modified .view-lines .view-line.stream-monaco-line-insert-fill::before,
+.stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-line-insert::before,
+.stream-monaco-diff-root .monaco-diff-editor .stream-monaco-fallback-line-insert::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--stream-monaco-line-number-gap-to-code, var(--stream-monaco-diff-code-gap, 0px)) * -1);
+  width: var(--stream-monaco-line-number-gap-to-code, var(--stream-monaco-diff-code-gap, 0px));
+  background: var(--stream-monaco-added-line-fill);
+  pointer-events: none;
+}
+.stream-monaco-diff-root .monaco-editor .line-delete:not(.line-numbers)::before,
+.stream-monaco-diff-root .monaco-diff-editor .line-delete:not(.line-numbers)::before,
+.stream-monaco-diff-root .monaco-editor .view-overlays > div:has(> .cdr.line-delete[style*="left:0"][style*="width:100%"])::before,
+.stream-monaco-diff-root .monaco-diff-editor .view-overlays > div:has(> .cdr.line-delete[style*="left:0"][style*="width:100%"])::before,
+.stream-monaco-diff-root .monaco-diff-editor .editor.original .view-lines .view-line.stream-monaco-line-delete-fill::before,
+.stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-line-delete::before,
+.stream-monaco-diff-root .monaco-diff-editor .stream-monaco-fallback-line-delete::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--stream-monaco-line-number-gap-to-code, var(--stream-monaco-diff-code-gap, 0px)) * -1);
+  width: var(--stream-monaco-line-number-gap-to-code, var(--stream-monaco-diff-code-gap, 0px));
+  background: var(--stream-monaco-removed-line-fill);
+  pointer-events: none;
+}
+.stream-monaco-diff-root.stream-monaco-diff-inline .monaco-diff-editor .editor.modified .view-zones .view-lines.line-delete,
+.stream-monaco-diff-root .monaco-diff-editor:not(.side-by-side) .editor.modified .view-zones .view-lines.line-delete {
+  margin-left: 0 !important;
+  width: 100% !important;
+  background: var(--stream-monaco-removed-line-fill) !important;
+}
+.stream-monaco-diff-root.stream-monaco-diff-inline .monaco-diff-editor .editor.modified .view-zones .view-lines.line-delete:not(.stream-monaco-inline-delete-positioned) .view-line,
+.stream-monaco-diff-root .monaco-diff-editor:not(.side-by-side) .editor.modified .view-zones .view-lines.line-delete:not(.stream-monaco-inline-delete-positioned) .view-line {
+  opacity: 0 !important;
+}
+.stream-monaco-diff-root .monaco-diff-editor .editor.modified .view-zones .view-lines.line-delete.stream-monaco-inline-delete-shifted {
+  transform: translateY(var(--stream-monaco-inline-delete-vertical-offset, -1lh)) !important;
+}
+.stream-monaco-diff-root .monaco-editor .core-guide,
+.stream-monaco-diff-root .monaco-diff-editor .core-guide {
+  display: none !important;
 }
 .stream-monaco-diff-root .monaco-editor .char-insert,
-.stream-monaco-diff-root .monaco-diff-editor .char-insert {
+.stream-monaco-diff-root .monaco-diff-editor .char-insert,
+.stream-monaco-diff-root .monaco-editor .line-insert:not(.line-numbers) > .cdr:not([style*="left:0"][style*="width:100%"]):not(.bracket-match),
+.stream-monaco-diff-root .monaco-diff-editor .line-insert:not(.line-numbers) > .cdr:not([style*="left:0"][style*="width:100%"]):not(.bracket-match),
+.stream-monaco-diff-root .monaco-diff-editor .editor.modified .view-overlays > div:has(> .cdr[style*="left:0"][style*="width:100%"]) > .cdr:not([style*="left:0"][style*="width:100%"]):not(.bracket-match) {
   background: var(--stream-monaco-added-inline) !important;
-  border: 1px solid var(--stream-monaco-added-inline-border) !important;
+  border: 0 !important;
   border-radius: 6px;
-  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--stream-monaco-added-fg) 18%, transparent);
+  box-sizing: border-box;
+  line-height: inherit;
+  padding: 0 !important;
+  vertical-align: baseline;
+  box-shadow:
+    inset 0 0 0 1px var(--stream-monaco-added-inline-border),
+    inset 0 -1px 0 color-mix(in srgb, var(--stream-monaco-added-fg) 18%, transparent);
 }
 .stream-monaco-diff-root .monaco-editor .char-delete,
 .stream-monaco-diff-root .monaco-diff-editor .char-delete,
-.stream-monaco-diff-root .monaco-editor .inline-deleted-text {
+.stream-monaco-diff-root .monaco-editor .inline-deleted-text,
+.stream-monaco-diff-root .monaco-editor .line-delete:not(.line-numbers) > .cdr:not([style*="left:0"][style*="width:100%"]):not(.bracket-match),
+.stream-monaco-diff-root .monaco-diff-editor .line-delete:not(.line-numbers) > .cdr:not([style*="left:0"][style*="width:100%"]):not(.bracket-match),
+.stream-monaco-diff-root .monaco-diff-editor .editor.original .view-overlays > div:has(> .cdr[style*="left:0"][style*="width:100%"]) > .cdr:not([style*="left:0"][style*="width:100%"]):not(.bracket-match) {
   background: var(--stream-monaco-removed-inline) !important;
-  border: 1px solid var(--stream-monaco-removed-inline-border) !important;
+  border: 0 !important;
   border-radius: 6px;
-  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--stream-monaco-removed-fg) 18%, transparent);
+  box-sizing: border-box;
+  line-height: inherit;
+  padding: 0 !important;
+  vertical-align: baseline;
+  box-shadow:
+    inset 0 0 0 1px var(--stream-monaco-removed-inline-border),
+    inset 0 -1px 0 color-mix(in srgb, var(--stream-monaco-removed-fg) 18%, transparent);
 }
 .stream-monaco-diff-root .monaco-editor .inline-deleted-text {
   text-decoration: none;
 }
 .stream-monaco-diff-root .monaco-editor .char-insert.diff-range-empty,
 .stream-monaco-diff-root .monaco-editor .char-delete.diff-range-empty {
-  min-width: 2px;
-  margin: 0 1px;
-  border-radius: 999px;
+  display: none !important;
+  min-width: 0;
+  margin: 0;
 }
 .stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-editor .line-insert,
 .stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-diff-editor .line-insert,
@@ -1602,11 +2494,21 @@ export class DiffEditorManager {
   border-color: transparent !important;
   box-shadow: none !important;
 }
-.stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-editor .line-delete.line-numbers,
-.stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-diff-editor .line-delete.line-numbers,
-.stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-editor .line-insert.line-numbers,
-.stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-diff-editor .line-insert.line-numbers {
-  color: var(--stream-monaco-line-number) !important;
+.stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-editor .line-insert:not(.line-numbers)::before,
+.stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-diff-editor .line-insert:not(.line-numbers)::before,
+.stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-editor .line-delete:not(.line-numbers)::before,
+.stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-diff-editor .line-delete:not(.line-numbers)::before {
+  background: transparent !important;
+}
+.stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-editor .stream-monaco-line-number-delete,
+.stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-diff-editor .stream-monaco-line-number-delete {
+  background: var(--stream-monaco-removed-line-fill) !important;
+  color: var(--stream-monaco-removed-fg) !important;
+}
+.stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-editor .stream-monaco-line-number-insert,
+.stream-monaco-diff-root.stream-monaco-diff-native-stale .monaco-diff-editor .stream-monaco-line-number-insert {
+  background: var(--stream-monaco-added-line-fill) !important;
+  color: var(--stream-monaco-added-fg) !important;
 }
 .stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-line-insert,
 .stream-monaco-diff-root .monaco-diff-editor .stream-monaco-fallback-line-insert {
@@ -1630,6 +2532,7 @@ export class DiffEditorManager {
 .stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-inline-delete-line {
   box-sizing: border-box;
   width: 100%;
+  padding-left: var(--stream-monaco-diff-code-padding);
   overflow: hidden;
   white-space: pre;
   color: inherit;
@@ -1640,7 +2543,7 @@ export class DiffEditorManager {
 .stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-inline-delete-margin {
   box-sizing: border-box;
   width: 100%;
-  background: var(--stream-monaco-removed-gutter);
+  background: var(--stream-monaco-removed-gutter), var(--stream-monaco-removed-line-fill);
   pointer-events: none;
 }
 .stream-monaco-diff-root.stream-monaco-diff-inline-native-ready .stream-monaco-fallback-inline-delete-zone,
@@ -1650,18 +2553,20 @@ export class DiffEditorManager {
 }
 .stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-gutter-insert,
 .stream-monaco-diff-root .monaco-diff-editor .stream-monaco-fallback-gutter-insert {
-  background: var(--stream-monaco-added-gutter) !important;
+  background: var(--stream-monaco-added-gutter), var(--stream-monaco-added-line-fill) !important;
 }
 .stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-gutter-delete,
 .stream-monaco-diff-root .monaco-diff-editor .stream-monaco-fallback-gutter-delete {
-  background: var(--stream-monaco-removed-gutter) !important;
+  background: var(--stream-monaco-removed-gutter), var(--stream-monaco-removed-line-fill) !important;
 }
 .stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-line-number-delete,
 .stream-monaco-diff-root .monaco-diff-editor .stream-monaco-fallback-line-number-delete {
+  background: var(--stream-monaco-removed-line-fill) !important;
   color: var(--stream-monaco-removed-fg) !important;
 }
 .stream-monaco-diff-root .monaco-editor .stream-monaco-fallback-line-number-insert,
 .stream-monaco-diff-root .monaco-diff-editor .stream-monaco-fallback-line-number-insert {
+  background: var(--stream-monaco-added-line-fill) !important;
   color: var(--stream-monaco-added-fg) !important;
 }
 .stream-monaco-diff-root.stream-monaco-diff-style-bar .monaco-diff-editor .gutter-insert {
@@ -1670,7 +2575,8 @@ export class DiffEditorManager {
       90deg,
       var(--stream-monaco-added-fg) 0 4px,
       transparent 4px 100%
-    ) !important;
+    ),
+    var(--stream-monaco-added-line-fill) !important;
 }
 .stream-monaco-diff-root.stream-monaco-diff-style-bar .monaco-diff-editor .gutter-delete,
 .stream-monaco-diff-root.stream-monaco-diff-style-bar .monaco-editor .inline-deleted-margin-view-zone {
@@ -1679,18 +2585,22 @@ export class DiffEditorManager {
       90deg,
       var(--stream-monaco-removed-fg) 0 4px,
       transparent 4px 100%
-    ) !important;
+    ),
+    var(--stream-monaco-removed-line-fill) !important;
+}
+.stream-monaco-diff-root .monaco-diff-editor .margin-view-overlays > .gutter-insert > .cmdr.gutter-insert,
+.stream-monaco-diff-root .monaco-diff-editor .margin-view-overlays > .gutter-delete > .cmdr.gutter-delete {
+  background: transparent !important;
+  box-shadow: none !important;
 }
 .stream-monaco-diff-root.stream-monaco-diff-style-bar .monaco-editor .line-insert,
 .stream-monaco-diff-root.stream-monaco-diff-style-bar .monaco-diff-editor .line-insert {
-  background:
-    color-mix(in srgb, var(--stream-monaco-added-line) 34%, transparent) !important;
+  background: var(--stream-monaco-added-line-fill) !important;
   box-shadow: none !important;
 }
 .stream-monaco-diff-root.stream-monaco-diff-style-bar .monaco-editor .line-delete,
 .stream-monaco-diff-root.stream-monaco-diff-style-bar .monaco-diff-editor .line-delete {
-  background:
-    color-mix(in srgb, var(--stream-monaco-removed-line) 34%, transparent) !important;
+  background: var(--stream-monaco-removed-line-fill) !important;
   box-shadow: none !important;
 }
 .stream-monaco-diff-root.stream-monaco-diff-style-bar .monaco-editor .char-insert,
@@ -1698,10 +2608,9 @@ export class DiffEditorManager {
   background:
     color-mix(in srgb, var(--stream-monaco-added-inline) 76%, transparent) !important;
   border: 0 !important;
-  border-bottom: 1px solid
-    color-mix(in srgb, var(--stream-monaco-added-fg) 30%, transparent) !important;
-  box-shadow: inset 0 -1px 0
-    color-mix(in srgb, var(--stream-monaco-added-fg) 26%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--stream-monaco-added-fg) 30%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--stream-monaco-added-fg) 26%, transparent);
 }
 .stream-monaco-diff-root.stream-monaco-diff-style-bar .monaco-editor .char-delete,
 .stream-monaco-diff-root.stream-monaco-diff-style-bar .monaco-diff-editor .char-delete,
@@ -1709,10 +2618,9 @@ export class DiffEditorManager {
   background:
     color-mix(in srgb, var(--stream-monaco-removed-inline) 76%, transparent) !important;
   border: 0 !important;
-  border-bottom: 1px solid
-    color-mix(in srgb, var(--stream-monaco-removed-fg) 30%, transparent) !important;
-  box-shadow: inset 0 -1px 0
-    color-mix(in srgb, var(--stream-monaco-removed-fg) 26%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--stream-monaco-removed-fg) 30%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--stream-monaco-removed-fg) 26%, transparent);
 }
 .stream-monaco-diff-root .monaco-editor .char-insert.stream-monaco-full-line-inline-insert,
 .stream-monaco-diff-root .monaco-diff-editor .char-insert.stream-monaco-full-line-inline-insert,
@@ -1767,21 +2675,40 @@ export class DiffEditorManager {
   border-radius: 999px;
 }
 .stream-monaco-diff-root .monaco-editor .line-numbers {
+  box-sizing: content-box !important;
+  background: var(--stream-monaco-line-number-bg) !important;
   color: var(--stream-monaco-line-number) !important;
   left: var(--stream-monaco-line-number-left) !important;
   width: var(--stream-monaco-line-number-width) !important;
+  padding-left: var(--stream-monaco-line-number-padding-left) !important;
+  padding-right: var(--stream-monaco-line-number-padding-right) !important;
   text-align: var(--stream-monaco-line-number-align) !important;
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset -1px 0 var(--stream-monaco-gutter-guide);
 }
 .stream-monaco-diff-root .monaco-editor .line-numbers.active-line-number {
-  color: var(--stream-monaco-line-number-active) !important;
+  color: var(--stream-monaco-line-number) !important;
 }
-.stream-monaco-diff-root .monaco-editor .line-delete.line-numbers,
-.stream-monaco-diff-root .monaco-diff-editor .line-delete.line-numbers {
+.stream-monaco-diff-root .monaco-editor .bracket-match,
+.stream-monaco-diff-root .monaco-diff-editor .bracket-match {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+.stream-monaco-diff-root .monaco-editor .cursor {
+  display: none !important;
+}
+.stream-monaco-diff-root .monaco-editor .line-numbers.stream-monaco-line-number-delete,
+.stream-monaco-diff-root .monaco-diff-editor .line-numbers.stream-monaco-line-number-delete {
+  background: var(--stream-monaco-removed-line-fill) !important;
   color: var(--stream-monaco-removed-fg) !important;
+  box-shadow: inset -1px 0 var(--stream-monaco-gutter-guide) !important;
 }
-.stream-monaco-diff-root .monaco-editor .line-insert.line-numbers,
-.stream-monaco-diff-root .monaco-diff-editor .line-insert.line-numbers {
+.stream-monaco-diff-root .monaco-editor .line-numbers.stream-monaco-line-number-insert,
+.stream-monaco-diff-root .monaco-diff-editor .line-numbers.stream-monaco-line-number-insert {
+  background: var(--stream-monaco-added-line-fill) !important;
   color: var(--stream-monaco-added-fg) !important;
+  box-shadow: inset -1px 0 var(--stream-monaco-gutter-guide) !important;
 }
 .stream-monaco-diff-root .monaco-diff-editor .editor.original .margin,
 .stream-monaco-diff-root .monaco-diff-editor .editor.original .margin-view-overlays,
@@ -2638,7 +3565,7 @@ export class DiffEditorManager {
     if (!this.diffPersistedUnchangedModelState)
       return
     this.rafScheduler.schedule('restore-diff-unchanged-state', () => {
-      requestAnimationFrame(() => {
+      this.rafScheduler.schedule('restore-diff-unchanged-state', () => {
         this.restorePersistedDiffUnchangedState()
       })
     })
@@ -2845,6 +3772,7 @@ export class DiffEditorManager {
   ): monaco.editor.IDiffEditorOptions {
     return {
       readOnly: this.options.readOnly ?? true,
+      domReadOnly: true,
       lineDecorationsWidth: this.options.lineDecorationsWidth,
       lineNumbersMinChars: this.options.lineNumbersMinChars,
       glyphMargin: this.resolveDiffGlyphMarginOption(hideUnchangedRegions),
@@ -2852,9 +3780,11 @@ export class DiffEditorManager {
       fontSize: this.options.fontSize,
       lineHeight: this.options.lineHeight,
       padding: this.options.padding,
-      renderLineHighlight: this.options.renderLineHighlight,
+      renderLineHighlight: this.options.renderLineHighlight ?? 'none',
       renderLineHighlightOnlyWhenFocus:
         this.options.renderLineHighlightOnlyWhenFocus,
+      matchBrackets: 'never',
+      bracketPairColorization: { enabled: false },
       renderOverviewRuler: this.options.renderOverviewRuler,
       scrollBeyondLastLine: this.options.scrollBeyondLastLine ?? false,
       scrollbar: {
@@ -2902,7 +3832,7 @@ export class DiffEditorManager {
     this.diffHeightManager?.update()
     this.applyDiffRootAppearanceClass()
     this.schedulePatchDiffUnchangedRegionsAfterInteraction(1)
-    this.repositionDiffHunkNodes()
+    this.scheduleRepositionDiffHunkNodes()
 
     if (shouldRecomputeDiffViewModelForUnchangedRegions) {
       void this.setDiffModels(
@@ -2957,6 +3887,7 @@ export class DiffEditorManager {
         this.inlineDiffStreamingPresentationActive = false
         this.resetInlineDiffStreamingHeightFloor()
         this.scheduleSyncDiffPresentationDecorations()
+        this.scheduleSyncDiffPresentationDecorationsFollowUp()
         this.diffHeightManager?.update()
       }, 3000) as unknown as number
     }
@@ -3002,10 +3933,10 @@ export class DiffEditorManager {
       this.diffThemeSyncRafId = null
       this.applyDiffRootAppearanceClass()
       this.schedulePatchDiffUnchangedRegionsAfterInteraction(1)
-      this.repositionDiffHunkNodes()
+      this.scheduleRepositionDiffHunkNodes()
     }
 
-    requestAnimationFrame(() => {
+    this.diffThemeSyncRafId = requestAnimationFrame(() => {
       this.diffThemeSyncRafId = requestAnimationFrame(sync)
     })
   }
@@ -3021,11 +3952,19 @@ export class DiffEditorManager {
       const view = node.ownerDocument.defaultView
       if (!view)
         return
+      let release: monaco.IDisposable
       const handleMouseUp = () => {
         view.removeEventListener('mouseup', handleMouseUp)
+        const index = bucket.indexOf(release)
+        if (index >= 0)
+          bucket.splice(index, 1)
         this.scheduleCapturePersistedDiffUnchangedState(1)
       }
+      release = {
+        dispose: () => view.removeEventListener('mouseup', handleMouseUp),
+      }
       view.addEventListener('mouseup', handleMouseUp, { once: true })
+      bucket.push(release)
     })
   }
 
@@ -3986,12 +4925,12 @@ export class DiffEditorManager {
         editor.onMouseLeave(() => this.scheduleHideDiffHunkActions()),
       )
       this.diffHunkDisposables.push(
-        editor.onDidScrollChange(() => this.repositionDiffHunkNodes()),
+        editor.onDidScrollChange(() => this.scheduleRepositionDiffHunkNodes()),
       )
       this.diffHunkDisposables.push(
         editor.onDidLayoutChange(() => {
           this.applyDiffRootAppearanceClass()
-          this.repositionDiffHunkNodes()
+          this.scheduleRepositionDiffHunkNodes()
         }),
       )
     }
@@ -4067,15 +5006,27 @@ export class DiffEditorManager {
       return
     }
     this.cancelScheduledHideDiffHunkActions()
-    this.diffHunkActiveChange = change
-    this.diffHunkActiveHoverSide = this.isDiffInlineMode()
+    const hoverSide = this.isDiffInlineMode()
       ? inferInlineDiffHunkHoverSide(
           change,
           event.target.position?.lineNumber ?? 0,
           event.target.element instanceof HTMLElement ? event.target.element : null,
         )
       : null
-    this.repositionDiffHunkNodes()
+    const targetChanged = this.diffHunkActiveChange !== change
+      || this.diffHunkActiveHoverSide !== hoverSide
+    this.diffHunkActiveChange = change
+    this.diffHunkActiveHoverSide = hoverSide
+    if (targetChanged)
+      this.scheduleRepositionDiffHunkNodes()
+  }
+
+  private scheduleRepositionDiffHunkNodes() {
+    if (!this.diffHunkActiveChange || !this.diffHunkUpperNode || !this.diffHunkLowerNode)
+      return
+    this.rafScheduler.schedule('reposition-diff-hunk-actions', () => {
+      this.repositionDiffHunkNodes()
+    })
   }
 
   private isOriginalEditorCollapsed() {
@@ -4342,6 +5293,7 @@ export class DiffEditorManager {
   private computeRawHeight(): number {
     return computeDiffRawHeight({
       diffEditorView: this.diffEditorView,
+      editorPadding: this.options.padding,
       maxHeightValue: this.maxHeightValue,
     })
   }
@@ -4705,6 +5657,10 @@ export class DiffEditorManager {
         ...(this.options.scrollbar || {}),
       },
       ...this.options,
+      domReadOnly: true,
+      renderLineHighlight: this.options.renderLineHighlight ?? 'none',
+      matchBrackets: 'never',
+      bracketPairColorization: { enabled: false },
       glyphMargin: this.resolveDiffGlyphMarginOption(hideUnchangedRegions),
       hideUnchangedRegions,
     })
@@ -4714,6 +5670,19 @@ export class DiffEditorManager {
       original: this.originalModel,
       modified: this.modifiedModel,
     })
+    try {
+      monaco.editor.colorizeModelLine(
+        this.originalModel,
+        this.originalModel.getLineCount(),
+        this.getModelTabSize(this.originalModel),
+      )
+      monaco.editor.colorizeModelLine(
+        this.modifiedModel,
+        this.modifiedModel.getLineCount(),
+        this.getModelTabSize(this.modifiedModel),
+      )
+    }
+    catch {}
 
     this.lastKnownOriginalCode = originalCode
     this.lastKnownModifiedCode = modifiedCode
@@ -4795,27 +5764,49 @@ export class DiffEditorManager {
     this.diffPresentationDisposables.push(
       this.diffEditorView.onDidUpdateDiff(() => {
         this.diffComputedVersions = this.captureCurrentDiffVersions()
+        try {
+          if (this.originalModel) {
+            monaco.editor.colorizeModelLine(
+              this.originalModel,
+              this.originalModel.getLineCount(),
+              this.getModelTabSize(this.originalModel),
+            )
+          }
+          if (this.modifiedModel) {
+            monaco.editor.colorizeModelLine(
+              this.modifiedModel,
+              this.modifiedModel.getLineCount(),
+              this.getModelTabSize(this.modifiedModel),
+            )
+          }
+        }
+        catch {}
         this.scheduleSyncDiffEditorLayoutToContainer()
         this.scheduleSyncDiffPresentationDecorations()
+        this.scheduleSyncDiffPresentationDecorationsFollowUp()
       }),
     )
     this.diffPresentationDisposables.push(
       oEditor.onDidChangeModelContent(() => {
         this.scheduleSyncDiffPresentationDecorations()
+        this.scheduleSyncDiffPresentationDecorationsFollowUp()
       }),
     )
     this.diffPresentationDisposables.push(
       mEditor.onDidChangeModelContent(() => {
         this.scheduleSyncDiffPresentationDecorations()
+        this.scheduleSyncDiffPresentationDecorationsFollowUp()
       }),
     )
     const originalLayoutDisposable = oEditor.onDidLayoutChange?.(() => {
       this.scheduleSyncDiffPresentationDecorations()
+      this.scheduleSyncDiffPresentationDecorationsFollowUp()
     })
     if (originalLayoutDisposable)
       this.diffPresentationDisposables.push(originalLayoutDisposable)
     const modifiedLayoutDisposable = mEditor.onDidLayoutChange?.(() => {
       this.scheduleSyncDiffPresentationDecorations()
+      this.scheduleSyncDiffPresentationDecorationsFollowUp()
     })
     if (modifiedLayoutDisposable)
       this.diffPresentationDisposables.push(modifiedLayoutDisposable)
@@ -4825,6 +5816,20 @@ export class DiffEditorManager {
     ) {
       this.diffPresentationObserver = new MutationObserver((mutations) => {
         const shouldSync = mutations.some((mutation) => {
+          if (mutation.type === 'attributes') {
+            const node = mutation.target
+            if (
+              mutation.attributeName === 'class'
+              && node instanceof HTMLElement
+              && mutation.oldValue === (node.getAttribute('class') ?? '')
+            ) {
+              return false
+            }
+            return node instanceof HTMLElement
+              && node.matches(
+                '.view-line, .line-insert, .line-delete, .line-numbers, .char-insert, .char-delete, .inline-deleted-text, .inline-deleted-margin-view-zone, .stream-monaco-line-insert-fill, .stream-monaco-line-delete-fill, .stream-monaco-line-number-insert, .stream-monaco-line-number-delete',
+              )
+          }
           if (mutation.type !== 'childList')
             return false
           const nodes = Array.from(mutation.addedNodes).concat(
@@ -4835,21 +5840,26 @@ export class DiffEditorManager {
               return false
             return (
               node.matches(
-                '.line-insert, .line-delete, .char-insert, .char-delete, .inline-deleted-text, .inline-deleted-margin-view-zone',
+                '.view-line, .line-insert, .line-delete, .line-numbers, .char-insert, .char-delete, .inline-deleted-text, .inline-deleted-margin-view-zone, .stream-monaco-line-insert-fill, .stream-monaco-line-delete-fill, .stream-monaco-line-number-insert, .stream-monaco-line-number-delete',
               )
               || !!node.querySelector(
-                '.line-insert, .line-delete, .char-insert, .char-delete, .inline-deleted-text, .inline-deleted-margin-view-zone',
+                '.view-line, .line-insert, .line-delete, .line-numbers, .char-insert, .char-delete, .inline-deleted-text, .inline-deleted-margin-view-zone, .stream-monaco-line-insert-fill, .stream-monaco-line-delete-fill, .stream-monaco-line-number-insert, .stream-monaco-line-number-delete',
               )
               || !!node.closest(
-                '.editor.modified .view-zones, .editor.modified .margin-view-zones',
+                '.view-lines, .editor.modified .view-zones, .editor.modified .margin-view-zones',
               )
             )
           })
         })
-        if (shouldSync)
+        if (shouldSync) {
           this.scheduleSyncDiffPresentationDecorations()
+          this.scheduleSyncDiffPresentationDecorationsFollowUp()
+        }
       })
       this.diffPresentationObserver.observe(this.lastContainer, {
+        attributes: true,
+        attributeFilter: ['class'],
+        attributeOldValue: true,
         childList: true,
         subtree: true,
       })
@@ -4948,7 +5958,7 @@ export class DiffEditorManager {
     this.setupDiffHunkInteractions()
     this.applyDiffRootAppearanceClass()
     this.scheduleSyncDiffPresentationDecorations()
-
+    this.scheduleSyncDiffPresentationDecorationsFollowUp()
     return this.diffEditorView
   }
 
@@ -5201,6 +6211,40 @@ export class DiffEditorManager {
     const preserveViewState = options.preserveViewState ?? sameContent
     let preparedViewModel: monaco.editor.IDiffEditorViewModel | null = null
 
+    if (this.originalModel && this.modifiedModel && sameContent) {
+      this.rafScheduler.cancel('diff')
+      this.pendingDiffUpdate = null
+      this.flushOriginalAppendBufferSync()
+      this.flushModifiedAppendBufferSync()
+      this.applyDiffModelLanguage(
+        {
+          original: this.originalModel,
+          modified: this.modifiedModel,
+        },
+        options.codeLanguage,
+      )
+      this.lastKnownOriginalCode = nextOriginalValue
+      this.lastKnownModifiedCode = nextModifiedValue
+      this.lastKnownModifiedLineCount = this.modifiedModel.getLineCount()
+      this.lastKnownModifiedDirty = false
+      this._hasScrollBar = false
+      this.cachedScrollHeightDiff
+        = this.diffEditorView.getModifiedEditor().getScrollHeight?.() ?? null
+      this.cachedLineHeightDiff
+        = this.diffEditorView
+          .getModifiedEditor()
+          .getOption?.(monaco.editor.EditorOption.lineHeight) ?? null
+      this.cachedComputedHeightDiff = this.computedHeight()
+      this.diffHunkLineChanges = this.getEffectiveLineChanges()
+      this.diffComputedVersions = this.captureCurrentDiffVersions()
+      this.preserveNativeDiffDecorationsOnStaleAppend = true
+      this.refreshDiffPresentation()
+      this.scheduleSyncDiffPresentationDecorations()
+      this.scheduleSyncDiffPresentationDecorationsFollowUp()
+      this.preserveNativeDiffDecorationsOnStaleAppend = false
+      return
+    }
+
     if (preserveViewState && sameContent) {
       try {
         preparedViewModel = this.diffEditorView.createViewModel({
@@ -5245,6 +6289,8 @@ export class DiffEditorManager {
       }
 
     if (!this.originalModel || !this.modifiedModel) {
+      this.clearFallbackInlineDeletedZones()
+      this.clearFallbackDiffDecorations()
       this.diffEditorView.setModel(nextModelTarget)
       this.originalModel = nextOriginal
       this.modifiedModel = nextModified
@@ -5259,7 +6305,7 @@ export class DiffEditorManager {
     this.pendingDiffUpdate = null
     this.flushOriginalAppendBufferSync()
     this.flushModifiedAppendBufferSync()
-    this.preserveNativeDiffDecorationsOnStaleAppend = false
+    this.preserveNativeDiffDecorationsOnStaleAppend = sameContent
 
     const currentOriginal = this.originalModel
     const currentModified = this.modifiedModel
@@ -5286,6 +6332,8 @@ export class DiffEditorManager {
       this.capturePersistedDiffUnchangedState()
     }
 
+    this.clearFallbackInlineDeletedZones()
+    this.clearFallbackDiffDecorations()
     const applyModelSwap = () => {
       this.diffEditorView?.setModel(nextModelTarget)
     }
@@ -5313,16 +6361,21 @@ export class DiffEditorManager {
         .getOption?.(monaco.editor.EditorOption.lineHeight) ?? null
     this.cachedComputedHeightDiff = this.computedHeight()
     this.diffHunkLineChanges = this.getEffectiveLineChanges()
-    this.hideDiffHunkActions()
-    this.clearDiffUnchangedBridgeOverlay(false)
-    this.syncDiffUnchangedViewZoneHeights()
-    this.diffComputedVersions = null
+    if (!sameContent) {
+      this.hideDiffHunkActions()
+      this.clearDiffUnchangedBridgeOverlay(false)
+      this.syncDiffUnchangedViewZoneHeights()
+    }
+    this.diffComputedVersions = sameContent && preparedViewModel
+      ? this.captureCurrentDiffVersions()
+      : null
 
     if (viewState)
       this.restoreDiffViewState(viewState)
 
     this.refreshDiffPresentation()
     this.scheduleSyncDiffPresentationDecorations()
+    this.scheduleSyncDiffPresentationDecorationsFollowUp()
     if (shouldRestorePersistedUnchangedState)
       this.scheduleRestorePersistedDiffUnchangedState()
     this.applyPendingDiffScrollRestore()
@@ -5653,6 +6706,7 @@ export class DiffEditorManager {
       this.appendBufferModifiedDiff.length = 0
       return
     }
+    const flushGeneration = this.diffModelTransitionRequestId
     let parts = this.appendBufferModifiedDiff.splice(0)
     if (parts.length === 0) {
       this.eagerlyGrowDiffContainerHeight()
@@ -5717,6 +6771,14 @@ export class DiffEditorManager {
       for (const part of parts) {
         if (!part)
           continue
+        if (
+          flushGeneration !== this.diffModelTransitionRequestId
+          || this.diffEditorView?.getModifiedEditor().getModel() !== model
+        ) {
+          if (suppressedByFlush)
+            watcherApi.setSuppressed(false)
+          return
+        }
         idx += 1
         log('diff', 'flushAppendBufferDiff chunk', {
           idx,
@@ -5734,6 +6796,14 @@ export class DiffEditorManager {
             ? requestAnimationFrame(resolve)
             : setTimeout(resolve, 0),
         )
+        if (
+          flushGeneration !== this.diffModelTransitionRequestId
+          || this.diffEditorView?.getModifiedEditor().getModel() !== model
+        ) {
+          if (suppressedByFlush)
+            watcherApi.setSuppressed(false)
+          return
+        }
         this.eagerlyGrowDiffContainerHeight()
         const shouldImmediate = this.shouldPerformImmediateRevealDiff()
         log('diff', 'flushAppendBufferDiff chunk metrics', {

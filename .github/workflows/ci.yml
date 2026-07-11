@@ -113,6 +113,15 @@ jobs:
       - name: Height stability smoke
         run: pnpm smoke:height-stability
 
+      - name: Inline diff validation
+        run: pnpm validate:diff-inline
+
+      - name: Diff gutter validation
+        run: pnpm validate:diff-gutter
+
+      - name: Diff transition validation
+        run: pnpm validate:diff-transition
+
   performance-gate:
     runs-on: ubuntu-22.04
     needs: [playwright-smoke]

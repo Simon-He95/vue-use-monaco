@@ -102,12 +102,20 @@ async function collectMetrics(page, lines, port) {
     }
 
     const root = document.querySelector('.editor')
-    const markerWidth =
-      Number.parseFloat(
-        getComputedStyle(root ?? document.body).getPropertyValue(
-          '--stream-monaco-gutter-marker-width',
-        ),
-      ) || 4
+    const readPx = (name, fallback) => {
+      const value = Number.parseFloat(
+        getComputedStyle(root ?? document.body).getPropertyValue(name),
+      )
+      return Number.isFinite(value) ? value : fallback
+    }
+    const expected = {
+      markerWidth: readPx('--stream-monaco-gutter-marker-width', 4),
+      lineNumberLeft: readPx('--stream-monaco-line-number-left', 4),
+      lineNumberWidth: readPx('--stream-monaco-line-number-width', 15.6),
+      lineNumberPaddingLeft: readPx('--stream-monaco-line-number-padding-left', 15.6),
+      lineNumberPaddingRight: readPx('--stream-monaco-line-number-padding-right', 7.8),
+      lineNumberGapToCode: readPx('--stream-monaco-line-number-gap-to-code', 7.8),
+    }
 
     const getPaneMetrics = (rootSelector) => {
       const pane = document.querySelector(rootSelector)
@@ -129,17 +137,19 @@ async function collectMetrics(page, lines, port) {
         visibleLineNumber: lineNumber.textContent?.trim() ?? '',
         boxLeftGap: lineNumberBoxRect.left - marginRect.left,
         boxRightGap: tokenRect.left - lineNumberBoxRect.right,
-        textStripeGap: lineNumberTextRect.left - marginRect.left - markerWidth,
+        textStripeGap: lineNumberTextRect.left - marginRect.left - expected.markerWidth,
         textCodeGap: tokenRect.left - lineNumberTextRect.right,
       }
     }
 
     return {
+      expected,
       original: getPaneMetrics('.editor.original'),
       modified: getPaneMetrics('.editor.modified'),
     }
   })
 
+  const expected = metrics.expected
   const original = metrics.original
   const modified = metrics.modified
   if (!original || !modified) {
@@ -154,6 +164,19 @@ async function collectMetrics(page, lines, port) {
   const summary = {
     lines,
     screenshotPath,
+    expected: {
+      markerWidth: round(expected.markerWidth),
+      lineNumberLeft: round(expected.lineNumberLeft),
+      lineNumberWidth: round(expected.lineNumberWidth),
+      lineNumberPaddingLeft: round(expected.lineNumberPaddingLeft),
+      lineNumberPaddingRight: round(expected.lineNumberPaddingRight),
+      lineNumberGapToCode: round(expected.lineNumberGapToCode),
+      numberBoxWidth: round(
+        expected.lineNumberWidth +
+          expected.lineNumberPaddingLeft +
+          expected.lineNumberPaddingRight,
+      ),
+    },
     original: {
       marginWidth: round(original.marginWidth),
       numberBoxWidth: round(original.numberBoxWidth),
@@ -179,20 +202,29 @@ async function collectMetrics(page, lines, port) {
   const marginWidthDelta = Math.abs(
     summary.original.marginWidth - summary.modified.marginWidth,
   )
-  const symmetryDelta = Math.max(
-    summary.original.symmetryDelta,
-    summary.modified.symmetryDelta,
-  )
   const paneDelta = Math.max(
     Math.abs(summary.original.textStripeGap - summary.modified.textStripeGap),
     Math.abs(summary.original.textCodeGap - summary.modified.textCodeGap),
   )
+  const expectedNumberBoxWidth =
+    expected.lineNumberWidth +
+    expected.lineNumberPaddingLeft +
+    expected.lineNumberPaddingRight
+  const targetDelta = Math.max(
+    Math.abs(original.boxLeftGap - expected.lineNumberLeft),
+    Math.abs(modified.boxLeftGap - expected.lineNumberLeft),
+    Math.abs(original.boxRightGap - expected.lineNumberGapToCode),
+    Math.abs(modified.boxRightGap - expected.lineNumberGapToCode),
+    Math.abs(original.numberBoxWidth - expectedNumberBoxWidth),
+    Math.abs(modified.numberBoxWidth - expectedNumberBoxWidth),
+  )
 
   return {
     ...summary,
-    ok: marginWidthDelta < 0.5 && symmetryDelta < 0.5 && paneDelta < 0.5,
+    ok: marginWidthDelta < 0.5 && paneDelta < 0.5 && targetDelta < 0.75,
     marginWidthDelta: round(marginWidthDelta),
     paneDelta: round(paneDelta),
+    targetDelta: round(targetDelta),
   }
 }
 

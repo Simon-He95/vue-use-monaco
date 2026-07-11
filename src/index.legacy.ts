@@ -18,6 +18,8 @@ import * as monaco from './monaco-shim'
 // token type (no colors) when Shiki providers fail to install.
 import 'monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution'
 import 'monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution'
+import 'monaco-editor/esm/vs/basic-languages/css/css.contribution'
+import 'monaco-editor/esm/vs/basic-languages/html/html.contribution'
 import 'monaco-editor/esm/vs/basic-languages/python/python.contribution'
 import 'monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution'
 

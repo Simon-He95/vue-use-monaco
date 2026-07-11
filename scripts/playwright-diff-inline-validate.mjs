@@ -161,7 +161,7 @@ async function collectMetrics(page, options) {
     theme,
   )}&lines=${encodeURIComponent(lines)}&unchangedStyle=${encodeURIComponent(
     unchangedStyle,
-  )}&capture=1`
+  )}&columns=1&capture=1`
 
   await page.goto(url, { waitUntil: 'networkidle' })
   await page.waitForSelector('.editor-card', { timeout: 20000 })
@@ -259,7 +259,7 @@ async function collectMetrics(page, options) {
     !metrics.diffClass.includes('side-by-side') ||
     (metrics.original?.width ?? 0) < 24
 
-  let ok = cardOverflow <= 1 && tabsOverflow <= 1 && fileStatsOverflow <= 1
+  let ok = inlineMode && cardOverflow <= 1 && tabsOverflow <= 1 && fileStatsOverflow <= 1
   if (inlineMode) {
     ok =
       ok &&
