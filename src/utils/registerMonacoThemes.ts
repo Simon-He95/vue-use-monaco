@@ -10,37 +10,64 @@ const LEGACY_MONACO_LANGS_INIT_KEY = '__streamMonacoLegacyMonacoLangsInit__'
 // Private benchmark hooks; not a public API.
 const PERF_HOOKS_ENABLED_KEY = '__STREAM_MONACO_ENABLE_INTERNAL_PERF_HOOKS__'
 let instrumentedHighlighterCache = new WeakMap<object, import('../type').ShikiHighlighter>()
-let defaultShikiEnginePromise: Promise<unknown | null> | null = null
-let defaultMonacoLanguagesPromise: Promise<void> | null = null
+const defaultMonacoLanguagePromises = new Map<string, Promise<void>>()
 
-async function ensureDefaultMonacoLanguageContributions() {
+async function ensureDefaultMonacoLanguageContributions(languages: string[]) {
   if (typeof window === 'undefined')
     return
 
-  if (!defaultMonacoLanguagesPromise) {
-    const pending = Promise.all([
-      import('monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution'),
-      import('monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution'),
-      import('monaco-editor/esm/vs/basic-languages/css/css.contribution'),
-      import('monaco-editor/esm/vs/basic-languages/html/html.contribution'),
-      import('monaco-editor/esm/vs/basic-languages/python/python.contribution'),
-      import('monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution'),
-      import('monaco-editor/esm/vs/basic-languages/shell/shell.contribution'),
-      import('monaco-editor/esm/vs/basic-languages/powershell/powershell.contribution'),
-      import('monaco-editor/esm/vs/language/json/monaco.contribution'),
-      import('monaco-editor/esm/vs/language/typescript/monaco.contribution'),
-      import('monaco-editor/esm/vs/language/html/monaco.contribution'),
-      import('monaco-editor/esm/vs/language/css/monaco.contribution'),
-    ]).then(() => undefined)
-    const retryable = pending.catch((error) => {
-      if (defaultMonacoLanguagesPromise === retryable)
-        defaultMonacoLanguagesPromise = null
-      throw error
-    })
-    defaultMonacoLanguagesPromise = retryable
+  const groups = new Set(languages.map((language) => {
+    if (language === 'jsx')
+      return 'javascript'
+    if (language === 'tsx')
+      return 'typescript'
+    if (language === 'c')
+      return 'cpp'
+    if (language === 'shellscript')
+      return 'shell'
+    return language
+  }))
+
+  const load = (group: string, loader: () => Promise<unknown>) => {
+    if (!groups.has(group))
+      return null
+    let promise = defaultMonacoLanguagePromises.get(group)
+    if (!promise) {
+      const pending = loader().then(() => undefined)
+      const retryable = pending.catch((error) => {
+        if (defaultMonacoLanguagePromises.get(group) === retryable)
+          defaultMonacoLanguagePromises.delete(group)
+        throw error
+      })
+      promise = retryable
+      defaultMonacoLanguagePromises.set(group, promise)
+    }
+    return promise
   }
 
-  await defaultMonacoLanguagesPromise
+  await Promise.all([
+    load('javascript', () => Promise.all([
+      import('monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution'),
+      import('monaco-editor/esm/vs/language/typescript/monaco.contribution'),
+    ])),
+    load('typescript', () => Promise.all([
+      import('monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution'),
+      import('monaco-editor/esm/vs/language/typescript/monaco.contribution'),
+    ])),
+    load('css', () => Promise.all([
+      import('monaco-editor/esm/vs/basic-languages/css/css.contribution'),
+      import('monaco-editor/esm/vs/language/css/monaco.contribution'),
+    ])),
+    load('html', () => Promise.all([
+      import('monaco-editor/esm/vs/basic-languages/html/html.contribution'),
+      import('monaco-editor/esm/vs/language/html/monaco.contribution'),
+    ])),
+    load('python', () => import('monaco-editor/esm/vs/basic-languages/python/python.contribution')),
+    load('cpp', () => import('monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution')),
+    load('shell', () => import('monaco-editor/esm/vs/basic-languages/shell/shell.contribution')),
+    load('powershell', () => import('monaco-editor/esm/vs/basic-languages/powershell/powershell.contribution')),
+    load('json', () => import('monaco-editor/esm/vs/language/json/monaco.contribution')),
+  ].filter(Boolean))
 }
 
 async function awaitLegacyOnigurumaInitIfPresent() {
@@ -71,24 +98,10 @@ async function getLegacyShikiEngineIfPresent() {
   return null
 }
 
-async function getDefaultShikiEngine() {
-  defaultShikiEnginePromise ??= (async () => {
-    try {
-      const shiki = await import('shiki')
-      if (typeof (shiki as any).createJavaScriptRegexEngine === 'function')
-        return (shiki as any).createJavaScriptRegexEngine()
-    }
-    catch {}
-    return null
-  })()
-
-  return defaultShikiEnginePromise
-}
-
 async function createHighlighterWithLegacyEngineIfNeeded(options: any) {
   await awaitLegacyOnigurumaInitIfPresent()
   await awaitLegacyMonacoLanguageContributionsIfPresent()
-  const engine = options?.engine ?? await getLegacyShikiEngineIfPresent() ?? await getDefaultShikiEngine()
+  const engine = options?.engine ?? await getLegacyShikiEngineIfPresent()
   if (engine)
     return createHighlighter({ ...options, engine })
   return createHighlighter(options)
@@ -450,8 +463,7 @@ export function clearHighlighterCache() {
   lastPatchedLanguages = new Set<string>()
   monacoThemeByKey.clear()
   monacoLanguageSet.clear()
-  defaultShikiEnginePromise = null
-  defaultMonacoLanguagesPromise = null
+  defaultMonacoLanguagePromises.clear()
   themeRegisterPromise = null
   instrumentedHighlighterCache = new WeakMap()
   languagesRegistered = false
@@ -601,7 +613,7 @@ export function registerMonacoThemes(
     let ensureHighlighterMs = 0
     let patchMonacoMs = 0
     let patchedMonaco = false
-    await ensureDefaultMonacoLanguageContributions()
+    await ensureDefaultMonacoLanguageContributions(languages)
     registerMonacoLanguages(languages)
 
     const p = (async () => {
@@ -733,6 +745,8 @@ export function registerMonacoThemes(
         }
         lastRegisteredHighlighter = res
       }
+      if (typeof window !== 'undefined')
+        await new Promise(resolve => setTimeout(resolve, 0))
       return res
     }
     catch (e) {

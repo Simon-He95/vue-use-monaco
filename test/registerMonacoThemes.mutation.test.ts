@@ -82,13 +82,11 @@ describe('registerMonacoThemes', () => {
     expect(shikiToMonaco).toHaveBeenCalledTimes(1)
   })
 
-  it('uses the JavaScript regex engine by default to avoid loading Shiki WASM', async () => {
+  it('uses the Shiki default engine when no legacy engine is configured', async () => {
     vi.resetModules()
 
-    const engine = { kind: 'javascript-regex' }
-    const createJavaScriptRegexEngine = vi.fn(() => engine)
     const createHighlighter = vi.fn(async () => ({}))
-    vi.doMock('shiki', () => ({ createHighlighter, createJavaScriptRegexEngine }))
+    vi.doMock('shiki', () => ({ createHighlighter }))
     vi.doMock('@shikijs/monaco', () => ({ shikiToMonaco: vi.fn() }))
     vi.doMock('../src/monaco-shim', () => {
       const editor = { defineTheme: vi.fn(), setTheme: vi.fn(), create: vi.fn() }
@@ -100,11 +98,9 @@ describe('registerMonacoThemes', () => {
 
     await registerMonacoThemes(['vitesse-dark'], ['javascript'])
 
-    expect(createJavaScriptRegexEngine).toHaveBeenCalledTimes(1)
     expect(createHighlighter).toHaveBeenCalledWith({
       themes: ['vitesse-dark'],
       langs: ['javascript'],
-      engine,
     })
   })
 

@@ -840,6 +840,8 @@ export class DiffEditorManager {
   }
 
   private scheduleSyncDiffPresentationDecorations() {
+    if (this.inlineDiffStreamingPresentationActive)
+      return
     this.rafScheduler.schedule('sync-diff-presentation', () => {
       this.syncDiffPresentationDecorations()
     })
@@ -3874,23 +3876,23 @@ export class DiffEditorManager {
     this.lastContainer?.classList?.remove(
       'stream-monaco-diff-inline-native-ready',
     )
+    this.inlineDiffStreamingPresentationActive = true
     if (this.isDiffInlineMode()) {
-      this.inlineDiffStreamingPresentationActive = true
       this.inlineDiffStreamingHeightFloor = Math.max(
         this.inlineDiffStreamingHeightFloor,
         this.diffHeightManager?.getLastApplied() ?? 0,
         this.lastContainer?.getBoundingClientRect?.().height ?? 0,
       )
-      this.clearInlineDiffStreamingPresentationIdleTimer()
-      this.inlineDiffStreamingPresentationIdleTimer = setTimeout(() => {
-        this.inlineDiffStreamingPresentationIdleTimer = null
-        this.inlineDiffStreamingPresentationActive = false
-        this.resetInlineDiffStreamingHeightFloor()
-        this.scheduleSyncDiffPresentationDecorations()
-        this.scheduleSyncDiffPresentationDecorationsFollowUp()
-        this.diffHeightManager?.update()
-      }, 3000) as unknown as number
     }
+    this.clearInlineDiffStreamingPresentationIdleTimer()
+    this.inlineDiffStreamingPresentationIdleTimer = setTimeout(() => {
+      this.inlineDiffStreamingPresentationIdleTimer = null
+      this.inlineDiffStreamingPresentationActive = false
+      this.resetInlineDiffStreamingHeightFloor()
+      this.scheduleSyncDiffPresentationDecorations()
+      this.scheduleSyncDiffPresentationDecorationsFollowUp()
+      this.diffHeightManager?.update()
+    }, 3000) as unknown as number
     const hideUnchangedRegions = this.diffHideUnchangedRegionsResolved
     if (!this.diffEditorView || !hideUnchangedRegions?.enabled)
       return
