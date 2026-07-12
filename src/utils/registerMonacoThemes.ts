@@ -115,6 +115,7 @@ let themeRegisterPromise: Promise<import('../type').ShikiHighlighter | null> | n
 // Serialize registrations to avoid races where multiple calls patch Monaco's
 // global `editor.setTheme` with different highlighters in an interleaved order.
 let registrationQueue: Promise<unknown> = Promise.resolve()
+let preferredMonacoThemeName: string | null = null
 function enqueueRegistration<T>(task: () => Promise<T>): Promise<T> {
   const next = registrationQueue.then(task, task)
   // keep queue alive even if a task rejects
@@ -472,6 +473,7 @@ export function clearHighlighterCache() {
   completedLanguages.clear()
   pendingRegistrations.clear()
   lastRegisteredHighlighter = null
+  preferredMonacoThemeName = null
   registrationGeneration++
 }
 
@@ -573,7 +575,20 @@ export { getOrCreateHighlighter }
 export function registerMonacoThemes(
   themes: (ThemeInput | string | SpecialTheme)[],
   languages: string[],
+  preferredThemeName?: string,
 ): Promise<import('../type').ShikiHighlighter | null> {
+  if (preferredThemeName)
+    preferredMonacoThemeName = preferredThemeName
+
+  const restorePreferredTheme = () => {
+    if (!preferredMonacoThemeName)
+      return
+    try {
+      monaco.editor.setTheme(preferredMonacoThemeName)
+    }
+    catch {}
+  }
+
   const requestedThemeKeys = new Set(themes.map(themeKey))
   const requestedLanguages = new Set(languages)
 
@@ -586,6 +601,7 @@ export function registerMonacoThemes(
       requestedLanguages,
     )
   ) {
+    restorePreferredTheme()
     return Promise.resolve(lastRegisteredHighlighter)
   }
 
@@ -598,6 +614,7 @@ export function registerMonacoThemes(
         requestedLanguages,
       )
     ) {
+      restorePreferredTheme()
       return pending.promise
     }
   }
@@ -714,6 +731,10 @@ export function registerMonacoThemes(
 
         const patchMonacoStartedAt = nowMs()
         shikiToMonaco(maybeInstrumentHighlighterGrammar(highlighter), monacoProxy)
+        // @shikijs/monaco applies the first loaded theme while installing its
+        // hooks. Restore the caller's current global theme in the same task so
+        // the temporary theme cannot reach a browser paint.
+        restorePreferredTheme()
         patchMonacoMs = nowMs() - patchMonacoStartedAt
         patchedMonaco = true
         lastPatchedHighlighter = highlighter

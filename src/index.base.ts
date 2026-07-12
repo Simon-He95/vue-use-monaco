@@ -245,7 +245,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}): UseMonacoReturn {
       return
     }
 
-    await registerMonacoThemes(themes, languages).catch(() => undefined)
+    await registerMonacoThemes(themes, languages, themeName).catch(() => undefined)
 
     if (token !== globalThemeRequestSeq) {
       return
@@ -260,6 +260,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}): UseMonacoReturn {
         const maybeHighlighter = await registerMonacoThemes(
           extended as any,
           languages,
+          themeName,
         )
         await tryLoadAndSetShikiTheme(maybeHighlighter, themeName).catch(
           () => undefined,
@@ -286,7 +287,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}): UseMonacoReturn {
     }
     catch {
       try {
-        const maybeHighlighter = await registerMonacoThemes(themes, languages)
+        const maybeHighlighter = await registerMonacoThemes(themes, languages, themeName)
         if (token !== globalThemeRequestSeq) {
           return
         }
@@ -356,7 +357,7 @@ function useMonaco(monacoOptions: MonacoOptions = {}): UseMonacoReturn {
     const list = availableNames.includes(themeName)
       ? themes
       : (themes.concat(themeName) as any)
-    await registerMonacoThemes(list as any, requestedLanguages)
+    await registerMonacoThemes(list as any, requestedLanguages, themeName)
   }
 
   function resolveRequestedThemeName() {
