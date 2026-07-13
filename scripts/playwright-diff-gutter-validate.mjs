@@ -128,6 +128,7 @@ async function collectMetrics(page, lines, port) {
       lineNumberWidth: readPx('--stream-monaco-line-number-width', 15.6),
       lineNumberPaddingLeft: readPx('--stream-monaco-line-number-padding-left', 15.6),
       lineNumberPaddingRight: readPx('--stream-monaco-line-number-padding-right', 7.8),
+      lineNumberSeparatorWidth: readPx('--stream-monaco-line-number-separator-width', 0),
       lineNumberGapToCode: readPx('--stream-monaco-line-number-gap-to-code', 7.8),
     }
 
@@ -184,11 +185,13 @@ async function collectMetrics(page, lines, port) {
       lineNumberWidth: round(expected.lineNumberWidth),
       lineNumberPaddingLeft: round(expected.lineNumberPaddingLeft),
       lineNumberPaddingRight: round(expected.lineNumberPaddingRight),
+      lineNumberSeparatorWidth: round(expected.lineNumberSeparatorWidth),
       lineNumberGapToCode: round(expected.lineNumberGapToCode),
       numberBoxWidth: round(
         expected.lineNumberWidth +
           expected.lineNumberPaddingLeft +
-          expected.lineNumberPaddingRight,
+          expected.lineNumberPaddingRight +
+          expected.lineNumberSeparatorWidth,
       ),
     },
     original: {
@@ -223,12 +226,17 @@ async function collectMetrics(page, lines, port) {
   const expectedNumberBoxWidth =
     expected.lineNumberWidth +
     expected.lineNumberPaddingLeft +
-    expected.lineNumberPaddingRight
+    expected.lineNumberPaddingRight +
+    expected.lineNumberSeparatorWidth
+  const expectedBoxRightGap = Math.max(
+    0,
+    expected.lineNumberGapToCode - expected.lineNumberSeparatorWidth,
+  )
   const targetDelta = Math.max(
     Math.abs(original.boxLeftGap - expected.lineNumberLeft),
     Math.abs(modified.boxLeftGap - expected.lineNumberLeft),
-    Math.abs(original.boxRightGap - expected.lineNumberGapToCode),
-    Math.abs(modified.boxRightGap - expected.lineNumberGapToCode),
+    Math.abs(original.boxRightGap - expectedBoxRightGap),
+    Math.abs(modified.boxRightGap - expectedBoxRightGap),
     Math.abs(original.numberBoxWidth - expectedNumberBoxWidth),
     Math.abs(modified.numberBoxWidth - expectedNumberBoxWidth),
   )
