@@ -324,10 +324,17 @@ export function resolveDiffUnchangedWheelScrollTarget(
   scrollTop: number,
   scrollLeft: number,
   event: Pick<WheelEvent, 'deltaX' | 'deltaY'>,
+  limits: { maxScrollTop?: number, maxScrollLeft?: number } = {},
 ) {
+  const nextScrollTop = scrollTop + event.deltaY
+  const nextScrollLeft = scrollLeft + event.deltaX
   return {
-    targetScrollTop: scrollTop + event.deltaY,
-    targetScrollLeft: scrollLeft + event.deltaX,
+    targetScrollTop: limits.maxScrollTop == null
+      ? nextScrollTop
+      : Math.max(0, Math.min(nextScrollTop, limits.maxScrollTop)),
+    targetScrollLeft: limits.maxScrollLeft == null
+      ? nextScrollLeft
+      : Math.max(0, Math.min(nextScrollLeft, limits.maxScrollLeft)),
     syncHorizontal: Math.abs(event.deltaX) >= 0.5,
   }
 }

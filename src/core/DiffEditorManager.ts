@@ -2620,9 +2620,20 @@ export class DiffEditorManager {
     ),
     var(--stream-monaco-removed-line-fill) !important;
 }
-.stream-monaco-diff-root .monaco-diff-editor .margin-view-overlays > .gutter-insert > .cmdr.gutter-insert,
+.stream-monaco-diff-root .monaco-diff-editor .margin-view-overlays > .gutter-insert > .cmdr.gutter-insert {
+  background: linear-gradient(
+    90deg,
+    transparent 0 var(--stream-monaco-line-number-box-width),
+    var(--stream-monaco-added-line-fill) var(--stream-monaco-line-number-box-width) 100%
+  ) !important;
+  box-shadow: none !important;
+}
 .stream-monaco-diff-root .monaco-diff-editor .margin-view-overlays > .gutter-delete > .cmdr.gutter-delete {
-  background: transparent !important;
+  background: linear-gradient(
+    90deg,
+    transparent 0 var(--stream-monaco-line-number-box-width),
+    var(--stream-monaco-removed-line-fill) var(--stream-monaco-line-number-box-width) 100%
+  ) !important;
   box-shadow: none !important;
 }
 .stream-monaco-diff-root.stream-monaco-diff-style-bar .monaco-editor .line-insert,
@@ -3841,6 +3852,7 @@ export class DiffEditorManager {
       scrollBeyondLastLine: this.options.scrollBeyondLastLine ?? false,
       scrollbar: {
         ...defaultScrollbar,
+        verticalScrollbarSize: 0,
         ...(this.options.scrollbar || {}),
       },
       hideUnchangedRegions: this.diffHideUnchangedRegionsDeferred
@@ -4256,20 +4268,35 @@ export class DiffEditorManager {
         return
       if (!shouldHandleDiffUnchangedWheel(event))
         return
-      event.preventDefault()
-      event.stopPropagation()
 
       const originalEditor = this.diffEditorView.getOriginalEditor()
       const modifiedEditor = this.diffEditorView.getModifiedEditor()
+      const modifiedLayout = modifiedEditor.getLayoutInfo()
+      const currentScrollTop = modifiedEditor.getScrollTop?.() ?? 0
+      const currentScrollLeft = modifiedEditor.getScrollLeft?.() ?? 0
       const {
         syncHorizontal,
         targetScrollLeft,
         targetScrollTop,
       } = resolveDiffUnchangedWheelScrollTarget(
-        modifiedEditor.getScrollTop?.() ?? 0,
-        modifiedEditor.getScrollLeft?.() ?? 0,
+        currentScrollTop,
+        currentScrollLeft,
         event,
+        {
+          maxScrollTop: Math.max(0, modifiedEditor.getScrollHeight() - modifiedLayout.height),
+          maxScrollLeft: Math.max(0, modifiedEditor.getScrollWidth() - modifiedLayout.width),
+        },
       )
+
+      if (
+        targetScrollTop === currentScrollTop
+        && (!syncHorizontal || targetScrollLeft === currentScrollLeft)
+      ) {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
 
       originalEditor.setScrollTop?.(targetScrollTop)
       modifiedEditor.setScrollTop?.(targetScrollTop)
@@ -5704,11 +5731,12 @@ export class DiffEditorManager {
       minimap: { enabled: false },
       theme: currentTheme,
       contextmenu: false,
+      ...this.options,
       scrollbar: {
         ...defaultScrollbar,
+        verticalScrollbarSize: 0,
         ...(this.options.scrollbar || {}),
       },
-      ...this.options,
       domReadOnly: true,
       renderLineHighlight: this.options.renderLineHighlight ?? 'none',
       matchBrackets: 'never',
