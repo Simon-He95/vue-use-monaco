@@ -12,7 +12,7 @@ vi.mock('../src/monaco-shim', () => {
     ) {}
   }
   const editor = {
-    EditorOption: { lineHeight: 'lineHeight' },
+    EditorOption: { fontInfo: 'fontInfo', lineHeight: 'lineHeight' },
     colorize: vi.fn(async (text: string, language: string) =>
       `<span class="mtk1" data-lang="${language}">${text}</span>`),
   }
@@ -193,15 +193,19 @@ describe('DiffEditorManager diff presentation', () => {
 
       const css = appendedStyles[0]?.textContent ?? ''
       const source = readFileSync(resolve(process.cwd(), 'src/core/DiffEditorManager.ts'), 'utf8')
-      expect(css).toContain('--stream-monaco-diff-code-gap: 7.8px;')
+      expect(css).toContain('--stream-monaco-diff-code-gap: 1ch;')
       expect(css).toContain('--stream-monaco-diff-code-padding: 0px;')
-      expect(css).toContain('--stream-monaco-line-number-left: var(--stream-monaco-gutter-marker-width);')
-      expect(css).toContain('--stream-monaco-line-number-width: 15.6px;')
-      expect(css).toContain('--stream-monaco-line-number-padding-left: 15.6px;')
-      expect(css).toContain('--stream-monaco-line-number-padding-right: 7.8px;')
+      expect(css).toContain('--stream-monaco-line-number-left: 0px;')
+      expect(css).toContain('--stream-monaco-line-number-width: 2ch;')
+      expect(css).toContain('--stream-monaco-line-number-padding-left: 2ch;')
+      expect(css).toContain('--stream-monaco-line-number-padding-right: 1ch;')
+      expect(css).toContain('--stream-monaco-line-number-separator-width: 2px;')
+      expect(css).toContain('--stream-monaco-layout-character-width: 1ch;')
       expect(css).toContain('--stream-monaco-line-number-box-width: calc(')
-      expect(css).toContain('--stream-monaco-line-number-gap-to-code: var(--stream-monaco-diff-code-gap);')
+      expect(css).toContain('--stream-monaco-line-number-gap-to-code: var(--stream-monaco-layout-character-width);')
       expect(css).toContain('--stream-monaco-line-number-align: right;')
+      expect(css).toContain('.editor.modified .lines-content')
+      expect(css).toContain('left: 0 !important;')
       expect(css).toContain('--stream-monaco-added-line-shadow: none;')
       expect(css).toContain('--stream-monaco-removed-line-shadow: none;')
       expect(css).not.toContain('inset 4px 0 0 var(--stream-monaco-added-fg)')
@@ -249,6 +253,9 @@ describe('DiffEditorManager diff presentation', () => {
       expect(css).toContain('width: var(--stream-monaco-line-number-gap-to-code, var(--stream-monaco-diff-code-gap, 0px));')
       expect(css).toContain('background: var(--stream-monaco-added-line-fill);')
       expect(css).toContain('background: var(--stream-monaco-removed-line-fill);')
+      expect(css).toContain('.margin-view-overlays > .gutter-insert > .cmdr.gutter-insert')
+      expect(css).toContain('.margin-view-overlays > .gutter-delete > .cmdr.gutter-delete')
+      expect(source).toContain('verticalScrollbarSize: 0')
       expect(css).not.toContain('.stream-monaco-fallback-inline-delete-line::before')
       expect(css).toContain('stream-monaco-diff-native-stale .monaco-editor .line-insert:not(.line-numbers)::before')
       expect(css).toContain('background: transparent !important;')
@@ -271,15 +278,17 @@ describe('DiffEditorManager diff presentation', () => {
       expect(css).toContain('white-space: pre;')
       expect(css).toContain('padding-left: var(--stream-monaco-line-number-padding-left) !important;')
       expect(css).toContain('padding-right: var(--stream-monaco-line-number-padding-right) !important;')
+      expect(css).toContain('min-width: var(--stream-monaco-line-number-width) !important;')
       expect(css).toContain('font-variant-numeric: tabular-nums;')
-      expect(css).toContain('box-shadow: inset -1px 0 var(--stream-monaco-gutter-guide);')
+      expect(css).toContain('border-right: var(--stream-monaco-line-number-separator-width) solid var(--stream-monaco-editor-bg) !important;')
       expect(css).toMatch(
         /\.line-numbers\.stream-monaco-line-number-delete \{\n  background: var\(--stream-monaco-removed-line-fill\) !important;\n  color: var\(--stream-monaco-removed-fg\) !important;/,
       )
       expect(css).toMatch(
         /\.line-numbers\.stream-monaco-line-number-insert \{\n  background: var\(--stream-monaco-added-line-fill\) !important;\n  color: var\(--stream-monaco-added-fg\) !important;/,
       )
-      expect(css).toContain('box-shadow: inset -1px 0 var(--stream-monaco-gutter-guide) !important;')
+      expect(css).toContain('box-shadow: none !important;')
+      expect(css).toContain('width: var(--stream-monaco-gutter-marker-width);')
       expect(css).toContain('.line-delete:not(.line-numbers) .view-line')
       expect(css).toContain('color: var(--stream-monaco-editor-fg) !important;')
       expect(css).toMatch(

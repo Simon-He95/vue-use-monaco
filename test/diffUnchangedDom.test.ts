@@ -168,6 +168,20 @@ describe('diffUnchangedDom helpers', () => {
       targetScrollLeft: 25,
       syncHorizontal: true,
     })
+
+    expect(
+      resolveDiffUnchangedWheelScrollTarget(10, 20, {
+        deltaX: 5,
+        deltaY: 7,
+      } as any, {
+        maxScrollTop: 12,
+        maxScrollLeft: 22,
+      }),
+    ).toEqual({
+      targetScrollTop: 12,
+      targetScrollLeft: 22,
+      syncHorizontal: true,
+    })
   })
 
   it('binds reveal button activation only when a handle exists', () => {
